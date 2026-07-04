@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}{{ action }} — Weather Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ action }}</h1>
+</div>
+
+<div style="max-width: 640px;">
+    <div class="card">
+        <form method="post">
+            {% csrf_token %}
+            <label for="{{ form.body.id_for_label }}">{{ form.body.label }}</label>
+            {{ form.body }}
+            {% if form.body.errors %}
+                <div class="alert alert-error" style="margin-top:0.5rem;">
+                    {{ form.body.errors|join:", " }}
+                </div>
+            {% endif %}
+            <div style="display:flex; gap:0.75rem; margin-top:1.25rem;">
+                <button type="submit" class="btn btn-primary">Uložit</button>
+                <a href="{% url 'notes:aktuality' %}" class="btn btn-ghost">Zrušit</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
