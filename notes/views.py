@@ -1,11 +1,13 @@
-from datetime import date
+import json
+from collections import defaultdict
+from datetime import date, timedelta
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 
-from ingest.models import DailyForecast
+from ingest.models import DailyForecast, HistoricalActual, WeatherPoint
 from .forms import NoteForm
 from .models import Note
 
@@ -130,6 +132,45 @@ def _get_since_login(last_login):
     }
 
 
+# ── Chart data (16-day national averages for Plotly) ───────────────────────
+
+def _get_chart_data():
+    """
+    Returns {cz: [{date, temp}, ...], sk: [...]} for the latest issued snapshot.
+    Used by the main dashboard Plotly chart.
+    """
+    latest = (
+        DailyForecast.objects
+        .filter(horizon=DailyForecast.HORIZON_SHORT, issued_at__isnull=False)
+        .order_by("-issued_at")
+        .values_list("issued_at__date", flat=True)
+        .first()
+    )
+    if not latest:
+        return {"cz": [], "sk": []}
+
+    rows = list(
+        DailyForecast.objects
+        .filter(horizon=DailyForecast.HORIZON_SHORT, issued_at__date=latest)
+        .select_related("point")
+        .order_by("forecast_date")
+    )
+
+    by_country_date = {"CZ": defaultdict(list), "SK": defaultdict(list)}
+    for r in rows:
+        if r.point.country in by_country_date and r.temperature_max is not None:
+            by_country_date[r.point.country][r.forecast_date.isoformat()].append(r.temperature_max)
+
+    result = {}
+    for country, by_date in by_country_date.items():
+        series = [
+            {"date": d, "temp": round(sum(vals) / len(vals), 1)}
+            for d, vals in sorted(by_date.items())
+        ]
+        result[country.lower()] = series
+    return result
+
+
 # ── Author filter chips ─────────────────────────────────────────────────────
 
 FILTER_ALL = "vse"
@@ -172,6 +213,8 @@ def aktuality(request):
     forecast_date, cz_avg, sk_avg, cz_points, sk_points = _get_weather_panel()
     since_login = _get_since_login(request.user.last_login)
     filter_chips = _build_filter_chips(notes_qs)
+    chart_json = json.dumps(_get_chart_data())
+    has_historical = HistoricalActual.objects.exists()
 
     return render(request, "notes/aktuality.html", {
         "notes": notes,
@@ -185,6 +228,8 @@ def aktuality(request):
         "since_login": since_login,
         "filter_chips": filter_chips,
         "active_filter": autor,
+        "chart_json": chart_json,
+        "has_historical": has_historical,
     })
 
 
@@ -309,3 +354,103 @@ def revision_tracker(request):
             context["not_enough_data"] = True
 
     return render(request, "notes/revision_tracker.html", context)
+
+
+# ── Point detail ─────────────────────────────────────────────────────────────
+
+@login_required
+def point_detail(request):
+    points = list(WeatherPoint.objects.all())
+    if not points:
+        return render(request, "notes/point_detail.html", {"points": []})
+
+    # Selected point via ?bod=<id>, default to first
+    try:
+        point_id = int(request.GET.get("bod", points[0].pk))
+        selected = next((p for p in points if p.pk == point_id), points[0])
+    except (ValueError, TypeError):
+        selected = points[0]
+
+    today = date.today()
+
+    # Latest issued batch for this point
+    latest_issued = (
+        DailyForecast.objects
+        .filter(point=selected, horizon=DailyForecast.HORIZON_SHORT, issued_at__isnull=False)
+        .order_by("-issued_at")
+        .values_list("issued_at__date", flat=True)
+        .first()
+    )
+
+    forecast_rows = []
+    chart_json = json.dumps({"dates": [], "temps_max": [], "temps_min": []})
+    revision_deltas = []
+    today_row = None
+
+    if latest_issued:
+        all_rows = list(
+            DailyForecast.objects
+            .filter(point=selected, horizon=DailyForecast.HORIZON_SHORT, issued_at__date=latest_issued)
+            .order_by("forecast_date")
+        )
+
+        today_matches = [r for r in all_rows if r.forecast_date == today]
+        today_row = today_matches[0] if today_matches else None
+
+        # 7-day table starting from today (or nearest future date)
+        future_rows = [r for r in all_rows if r.forecast_date >= today]
+        forecast_rows = future_rows[:7]
+
+        # Full 16-day chart series
+        chart_json = json.dumps({
+            "dates": [r.forecast_date.isoformat() for r in all_rows],
+            "temps_max": [r.temperature_max for r in all_rows],
+            "temps_min": [r.temperature_min for r in all_rows],
+        })
+
+        # Per-point revision deltas: compare last two issued batches
+        batch_dates = list(
+            DailyForecast.objects
+            .filter(point=selected, horizon=DailyForecast.HORIZON_SHORT, issued_at__isnull=False)
+            .order_by("-issued_at__date")
+            .values_list("issued_at__date", flat=True)
+            .distinct()[:2]
+        )
+        if len(batch_dates) >= 2:
+            latest_b, prev_b = batch_dates[0], batch_dates[1]
+            latest_map = {
+                r.forecast_date: r.temperature_max
+                for r in DailyForecast.objects.filter(
+                    point=selected, horizon=DailyForecast.HORIZON_SHORT,
+                    issued_at__date=latest_b, forecast_date__gte=today,
+                )
+            }
+            prev_map = {
+                r.forecast_date: r.temperature_max
+                for r in DailyForecast.objects.filter(
+                    point=selected, horizon=DailyForecast.HORIZON_SHORT,
+                    issued_at__date=prev_b, forecast_date__gte=today,
+                )
+            }
+            for fd in sorted(latest_map)[:7]:
+                lt = latest_map.get(fd)
+                pt = prev_map.get(fd)
+                if lt is not None and pt is not None:
+                    delta = round(lt - pt, 1)
+                    if abs(delta) >= 0.5:
+                        revision_deltas.append({
+                            "date": fd,
+                            "delta": delta,
+                            "latest": lt,
+                            "prev": pt,
+                        })
+
+    return render(request, "notes/point_detail.html", {
+        "points": points,
+        "selected": selected,
+        "today_row": today_row,
+        "forecast_rows": forecast_rows,
+        "chart_json": chart_json,
+        "revision_deltas": revision_deltas,
+        "latest_issued": latest_issued,
+    })

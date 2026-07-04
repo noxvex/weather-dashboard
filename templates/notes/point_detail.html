@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% load weather_tags %}
+
+{% block title %}{{ selected.name }} — Weather Dashboard{% endblock %}
+
+{% block extra_head %}
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" defer></script>
+{% endblock %}
+
+{% block content %}
+
+{% if not points %}
+    <div class="coming-soon">
+        <span class="cs-icon">📍</span>
+        <h3>Žádné body</h3>
+        <p>Spusťte <code>seed_points</code> pro naplnění databáze bodů.</p>
+    </div>
+{% else %}
+
+{# ── Point selector ── #}
+<form method="get" style="margin-bottom:0;">
+    <select name="bod" class="point-select" onchange="this.form.submit()">
+        {% for p in points %}
+            <option value="{{ p.pk }}" {% if p.pk == selected.pk %}selected{% endif %}>
+                {{ p.name }} ({{ p.country }})
+            </option>
+        {% endfor %}
+    </select>
+</form>
+
+{# ── Hero: single point ── #}
+<div class="hero">
+    <div class="hero-label">{{ selected.name|upper }} · {{ selected.country }} · DNES</div>
+    <div class="hero-num">
+        {% if today_row and today_row.temperature_max is not None %}{{ today_row.temperature_max|temp_round }}°{% else %}—{% endif %}
+    </div>
+    <div class="hero-cond">
+        {% if today_row %}
+            {% if today_row.weather_code is not None %}{{ today_row.weather_code|weather_icon }}{% endif %}
+            {% if today_row.temperature_min is not None %}min {{ today_row.temperature_min|temp_round }}°{% endif %}
+            {% if today_row.wind_speed_max is not None %}· vítr {{ today_row.wind_speed_max|floatformat:0 }} km/h{% endif %}
+            {% if today_row.precipitation_sum is not None %}· {{ today_row.precipitation_sum }} mm srážek{% endif %}
+        {% else %}
+            Dnešní data zatím nejsou k dispozici
+        {% endif %}
+    </div>
+</div>
+
+{# ── 7-day forecast table ── #}
+{% if forecast_rows %}
+<div class="card">
+    <div class="card-title">Předpověď · 7 dní</div>
+    {% for row in forecast_rows %}
+        {% with t_min=row.temperature_min|default:0 t_max=row.temperature_max|default:0 %}
+        <div class="fc-row">
+            <span class="fc-day">{{ row.forecast_date|day_cs }}</span>
+            <span class="fc-icon">{{ row.weather_code|weather_icon }}</span>
+            <span class="fc-range">
+                {{ t_min|temp_round }}°
+                <span class="fc-track">
+                    {# Position the fill bar relative to the week's range #}
+                    <span class="fc-fill" style="left:15%; width:70%;"></span>
+                </span>
+                {{ t_max|temp_round }}°
+            </span>
+            <span class="fc-rain">
+                {% if row.precipitation_prob_max is not None %}{{ row.precipitation_prob_max }}&thinsp;%{% else %}—{% endif %}
+            </span>
+        </div>
+        {% endwith %}
+    {% endfor %}
+</div>
+{% else %}
+<div class="card">
+    <div class="no-data" style="padding:1.5rem 0;">Předpovědní data zatím nejsou k dispozici. Spusťte <code style="color:var(--accent);">ingest_weather</code>.</div>
+</div>
+{% endif %}
+
+{# ── 16-day temperature chart ── #}
+<div class="card">
+    <div class="card-title">Vývoj teploty <span class="hint">16denní okno</span></div>
+    <div id="point-chart"></div>
+</div>
+
+{# ── Per-point revision deltas ── #}
+<div class="card">
+    <div class="card-title">Revize předpovědi <span class="hint">tento bod · poslední dva snímky</span></div>
+    {% if revision_deltas %}
+        {% for r in revision_deltas %}
+        <div class="delta-row">
+            <span>{{ r.date|day_cs }}, {{ r.date|date:"j. n." }}</span>
+            {% if r.delta > 0 %}
+                <span class="d-chip d-chip-up">+{{ r.delta }} °C od předchozího</span>
+            {% else %}
+                <span class="d-chip d-chip-down">{{ r.delta }} °C od předchozího</span>
+            {% endif %}
+        </div>
+        {% endfor %}
+    {% elif latest_issued %}
+        <div style="font-size:12px; color:var(--muted); padding:6px 0;">
+            Žádné výrazné změny mezi posledními dvěma snímky (práh ≥ 0,5 °C).
+        </div>
+    {% else %}
+        <div style="font-size:12px; color:var(--muted); padding:6px 0;">
+            Revize budou dostupné po alespoň dvou denních snímcích předpovědi.
+        </div>
+    {% endif %}
+</div>
+
+{% endif %}{# end if points #}
+
+{% endblock %}
+
+{% block extra_js %}
+{{ chart_json|json_script:"point-chart-data" }}
+<script>
+(function () {
+    const raw = JSON.parse(document.getElementById('point-chart-data').textContent);
+    if (!raw.dates || !raw.dates.length) return;
+
+    const traces = [
+        {
+            x: raw.dates,
+            y: raw.temps_max,
+            type: 'scatter', mode: 'lines', name: 'Max',
+            line: { color: '#4A9EFF', width: 2.5, shape: 'spline' },
+            fill: 'tozeroy', fillcolor: 'rgba(74,158,255,0.10)',
+            hovertemplate: '%{y:.1f}°C<extra>Max</extra>',
+        },
+        {
+            x: raw.dates,
+            y: raw.temps_min,
+            type: 'scatter', mode: 'lines', name: 'Min',
+            line: { color: '#2DD4BF', width: 1.5, shape: 'spline', dash: 'dot' },
+            hovertemplate: '%{y:.1f}°C<extra>Min</extra>',
+        },
+    ];
+
+    const layout = {
+        paper_bgcolor: 'transparent',
+        plot_bgcolor:  'transparent',
+        font: { color: '#8A97AD', family: 'Inter, sans-serif', size: 10 },
+        margin: { t: 6, r: 10, b: 34, l: 36 },
+        xaxis: {
+            gridcolor: 'rgba(36,48,68,0.6)',
+            tickcolor: 'transparent',
+            tickfont: { size: 10, color: '#8A97AD' },
+            showline: false, type: 'date',
+        },
+        yaxis: {
+            gridcolor: 'rgba(36,48,68,0.5)',
+            tickcolor: 'transparent',
+            tickfont: { size: 10, color: '#8A97AD' },
+            showline: false,
+            ticksuffix: '°',
+            zeroline: false,
+        },
+        legend: {
+            font: { size: 10, color: '#8A97AD' },
+            bgcolor: 'transparent',
+            orientation: 'h', x: 0, y: 1.12,
+        },
+        hovermode: 'x unified',
+        hoverlabel: {
+            bgcolor: '#131C2E',
+            bordercolor: '#243044',
+            font: { color: '#E8EDF5', size: 12 },
+        },
+    };
+
+    Plotly.newPlot('point-chart', traces, layout, { displayModeBar: false, responsive: true });
+}());
+</script>
+{% endblock %}

@@ -2,52 +2,6 @@
 
 {% block title %}Revize předpovědí — Weather Dashboard{% endblock %}
 
-{% block extra_head %}
-<style>
-.rev-tabs { display: flex; gap: 0.5rem; margin-bottom: 1.75rem; }
-.rev-tab {
-    padding: 0.45rem 1.1rem; border-radius: 6px; font-size: 0.85rem; font-weight: 500;
-    border: 1px solid var(--border); color: var(--muted); text-decoration: none;
-    transition: color 0.15s, background 0.15s;
-}
-.rev-tab:hover { color: var(--text); background: var(--border); text-decoration: none; }
-.rev-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-
-.coming-soon {
-    background: var(--surface); border: 1px dashed var(--border);
-    border-radius: 8px; padding: 3rem 2rem; text-align: center; color: var(--muted);
-}
-.coming-soon .cs-icon { font-size: 2rem; display: block; margin-bottom: 0.75rem; }
-.coming-soon h3 { color: var(--text); margin-bottom: 0.5rem; font-size: 1rem; }
-.coming-soon p { font-size: 0.85rem; line-height: 1.6; max-width: 420px; margin: 0 auto; }
-
-.rev-meta { font-size: 0.78rem; color: var(--muted); margin-bottom: 1.25rem; }
-.rev-meta strong { color: var(--text); }
-
-.rev-table { width: 100%; border-collapse: collapse; }
-.rev-table th {
-    text-align: left; font-size: 0.72rem; font-weight: 700;
-    text-transform: uppercase; letter-spacing: 0.06em;
-    color: var(--muted); padding: 0.5rem 0.85rem;
-    border-bottom: 1px solid var(--border);
-}
-.rev-table td {
-    padding: 0.55rem 0.85rem; font-size: 0.85rem;
-    border-bottom: 1px solid rgba(36,48,68,0.5);
-    color: var(--text);
-}
-.rev-table tr:hover td { background: rgba(255,255,255,0.02); }
-.delta-pos { color: var(--red); font-weight: 600; }
-.delta-neg { color: var(--teal); font-weight: 600; }
-.delta-zero { color: var(--muted); }
-.country-chip {
-    font-size: 0.68rem; font-weight: 700; padding: 0.1rem 0.45rem;
-    border-radius: 99px; background: rgba(74,158,255,0.12); color: var(--accent);
-}
-.no-data-row { text-align: center; color: var(--muted); padding: 2rem; font-size: 0.85rem; }
-</style>
-{% endblock %}
-
 {% block content %}
 
 <div class="page-header">
@@ -55,22 +9,25 @@
     <p>Porovnání po sobě jdoucích snímků — co se změnilo oproti předchozímu dni</p>
 </div>
 
-<div class="rev-tabs">
+{# Segmented control styled to match prototype #}
+<div class="rev-seg">
     <a href="?rozsah=aktualni"
-       class="rev-tab {% if bucket == 'aktualni' %}active{% endif %}">
+       class="rev-seg-btn {% if bucket == 'aktualni' %}on{% endif %}">
         Aktuální
     </a>
     <a href="?rozsah=strednedobe"
-       class="rev-tab {% if bucket == 'strednedobe' %}active{% endif %}">
-        Střednědobá
+       class="rev-seg-btn soon {% if bucket == 'strednedobe' %}on{% endif %}"
+       title="Data se sbírají — zobrazení brzy">
+        Střednědobá<br><small style="font-size:9px; opacity:.7;">sbírá se</small>
     </a>
     <a href="?rozsah=dlouhodobe"
-       class="rev-tab {% if bucket == 'dlouhodobe' %}active{% endif %}">
-        Dlouhodobá
+       class="rev-seg-btn soon {% if bucket == 'dlouhodobe' %}on{% endif %}"
+       title="Data se sbírají — zobrazení brzy">
+        Dlouhodobá<br><small style="font-size:9px; opacity:.7;">sbírá se</small>
     </a>
 </div>
 
-{# ── Aktuální ── #}
+{# ── Aktuální bucket ── #}
 {% if bucket == "aktualni" %}
     {% if not_enough_data %}
         <div class="coming-soon">
@@ -81,9 +38,10 @@
         </div>
     {% else %}
         <div class="rev-meta">
-            Srovnání snímků: <strong>{{ previous_batch|date:"j. n." }}</strong>
-            → <strong>{{ latest_batch|date:"j. n." }}</strong>
-            &nbsp;·&nbsp; Zobrazeny odchylky ≥ 0.5 °C
+            Srovnání snímků:
+            <strong>{{ previous_batch|date:"j. n." }}</strong> →
+            <strong>{{ latest_batch|date:"j. n." }}</strong>
+            &nbsp;·&nbsp; Zobrazeny odchylky ≥ 0,5 °C
         </div>
 
         <div class="card" style="padding:0; overflow:hidden;">
@@ -92,10 +50,10 @@
                     <tr>
                         <th>Země</th>
                         <th>Datum předpovědi</th>
-                        <th>Předchozí max °C</th>
-                        <th>Aktuální max °C</th>
+                        <th>Předchozí max</th>
+                        <th>Aktuální max</th>
                         <th>Změna</th>
-                        <th>Srážky Δ mm</th>
+                        <th>Srážky Δ</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -139,9 +97,9 @@
         <h3>Data se sbírají</h3>
         <p>
             {% if bucket == "strednedobe" %}
-                Střednědobá revizní data (SEAS5, EC46) se začínají sbírat od tohoto updatu.
+                Střednědobá revizní data (SEAS5, EC46) se sbírají od tohoto updatu.
             {% else %}
-                Dlouhodobá revizní data se začínají sbírat od tohoto updatu.
+                Dlouhodobá revizní data se sbírají od tohoto updatu.
             {% endif %}
             Zobrazení bude dostupné jakmile budou k dispozici alespoň dva snímky.
             Jde o záměr — data <em>jsou</em> sbírána, UI přichází brzy.

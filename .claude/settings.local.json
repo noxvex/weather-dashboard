@@ -3,7 +3,8 @@
     "allow": [
       "Bash(pip3 --version)",
       "Bash(cp *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit *)"
     ]
   }
 }
