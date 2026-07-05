@@ -9,6 +9,9 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 from ingest.models import WeatherPoint, MediumLongRangeForecast
 
+# SEAS5 gives ensemble monthly totals, not probabilities.
+# precip_probability in MediumLongRangeForecast stores raw mm sum for now;
+# probability will be derived once HistoricalActual has enough baseline data.
 MONTHLY_VARS = "temperature_2m_mean,precipitation_sum"
 
 

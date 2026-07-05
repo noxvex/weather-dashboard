@@ -4,8 +4,8 @@ Chunks by calendar year so any single failure only loses one year for one point.
 Uses bulk_create with ignore_conflicts=True so re-running is safe.
 
 Usage:
-    python manage.py fetch_era5_backfill                    # 2010-01-01 to today
-    python manage.py fetch_era5_backfill --start 2020-01-01 --end 2020-12-31
+    python manage.py fetch_era5_backfill                           # 2 years back to today (safe default)
+    python manage.py fetch_era5_backfill --start 2020-01-01        # extend once you've verified volume
     python manage.py fetch_era5_backfill --start 2010-01-01 --end 2010-12-31  # test one year first
 """
 import time
@@ -17,7 +17,12 @@ from django.core.management.base import BaseCommand
 from ingest.models import WeatherPoint, HistoricalActual
 
 DAILY_VARS = "temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max"
-DEFAULT_START = date(2010, 1, 1)
+
+
+def _default_start():
+    # 2 years back — conservative starting point; extend with --start once volume is verified
+    today = date.today()
+    return date(today.year - 2, today.month, today.day)
 
 
 def fetch_era5_year(point, year_start, year_end):
@@ -41,14 +46,14 @@ def fetch_era5_year(point, year_start, year_end):
 
 
 class Command(BaseCommand):
-    help = "Backfill ERA5 historical actuals from 2010 (or custom range) to today."
+    help = "Backfill ERA5 historical actuals (default: 2 years back). Use --start to extend further."
 
     def add_arguments(self, parser):
-        parser.add_argument("--start", default=None, help="Start date YYYY-MM-DD (default: 2010-01-01)")
-        parser.add_argument("--end", default=None, help="End date YYYY-MM-DD (default: today)")
+        parser.add_argument("--start", default=None, help="Start date YYYY-MM-DD (default: 2 years ago)")
+        parser.add_argument("--end", default=None, help="End date YYYY-MM-DD (default: today − 5 days)")
 
     def handle(self, *args, **options):
-        start = date.fromisoformat(options["start"]) if options["start"] else DEFAULT_START
+        start = date.fromisoformat(options["start"]) if options["start"] else _default_start()
         end = date.fromisoformat(options["end"]) if options["end"] else date.today() - timedelta(days=5)
         # ERA5 has a ~5-day lag before data is finalised; stop 5 days before today
 

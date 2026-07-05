@@ -1,195 +1,77 @@
 {% extends "base.html" %}
+{% load weather_tags %}
 
 {% block title %}Aktuality — Weather Dashboard{% endblock %}
 
 {% block extra_head %}
-<style>
-.ak-grid {
-    display: grid;
-    grid-template-columns: 1fr 340px;
-    gap: 2rem;
-    align-items: start;
-}
-@media (max-width: 860px) {
-    .ak-grid { grid-template-columns: 1fr; }
-    .ak-sidebar { order: -1; }
-}
-
-/* ── Filter chips ── */
-.filter-bar {
-    display: flex;
-    gap: 0.4rem;
-    flex-wrap: wrap;
-    margin-bottom: 1.25rem;
-}
-.chip {
-    font-size: 0.75rem;
-    font-weight: 600;
-    padding: 0.3rem 0.75rem;
-    border-radius: 99px;
-    border: 1px solid var(--border);
-    color: var(--muted);
-    text-decoration: none;
-    transition: color 0.15s, background 0.15s, border-color 0.15s;
-}
-.chip:hover { color: var(--text); background: var(--border); text-decoration: none; }
-.chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-
-/* ── Since-login banner ── */
-.since-banner {
-    background: rgba(74,158,255,0.08);
-    border: 1px solid rgba(74,158,255,0.25);
-    border-radius: 7px;
-    padding: 0.65rem 1rem;
-    margin-bottom: 1rem;
-    font-size: 0.82rem;
-    color: var(--muted);
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-}
-.since-banner strong { color: var(--accent); }
-
-/* ── Section label ── */
-.section-label {
-    font-size: 0.72rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: var(--muted);
-    margin-bottom: 1rem;
-}
-
-/* ── Note cards ── */
-.note-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 1.1rem 1.25rem 0.9rem;
-    margin-bottom: 0.75rem;
-    border-left: 3px solid transparent;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.28), 0 1px 2px rgba(0,0,0,0.18);
-    transition: box-shadow 0.2s, transform 0.15s;
-}
-.note-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.38), 0 2px 4px rgba(0,0,0,0.2); transform: translateY(-1px); }
-.note-card.note--leader  { border-left-color: var(--red); }
-.note-card.note--system  { border-left-color: var(--teal); }
-
-.note-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 0.45rem; margin-bottom: 0.6rem; }
-.note-author { font-size: 0.82rem; font-weight: 700; color: var(--text); }
-.note-author.is-leader { color: var(--red); }
-.note-author.is-system  { color: var(--teal); }
-.note-dot { color: var(--border); font-size: 0.7rem; }
-.note-time { font-size: 0.78rem; color: var(--muted); }
-
-.note-badge {
-    font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.06em; padding: 0.15rem 0.5rem; border-radius: 99px;
-}
-.badge-pinned  { background: rgba(74,158,255,0.14); color: var(--accent); }
-.badge-change  { background: rgba(45,212,191,0.12); color: var(--teal); }
-.badge-outlook { background: rgba(45,212,191,0.12); color: var(--teal); }
-
-.note-body { font-size: 0.93rem; line-height: 1.7; color: var(--text); white-space: pre-wrap; }
-
-.note-actions {
-    display: flex; gap: 0.35rem; margin-top: 0.85rem;
-    padding-top: 0.7rem; border-top: 1px solid var(--border);
-}
-.act-btn {
-    font-size: 0.75rem; font-weight: 500; padding: 0.28rem 0.65rem;
-    border-radius: 5px; border: 1px solid var(--border);
-    background: transparent; color: var(--muted); cursor: pointer;
-    text-decoration: none;
-    transition: color 0.15s, background 0.15s, border-color 0.15s; line-height: 1;
-}
-.act-btn:hover { color: var(--text); background: var(--border); text-decoration: none; }
-.act-btn.danger:hover { color: var(--red); border-color: rgba(248,113,113,0.5); background: rgba(248,113,113,0.08); }
-.act-btn.is-pinned { color: var(--accent); border-color: rgba(74,158,255,0.4); }
-.act-btn.is-pinned:hover { background: rgba(74,158,255,0.1); }
-
-/* ── Compose ── */
-.compose-card {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 8px; padding: 1.25rem; margin-top: 1rem;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-}
-.compose-card textarea { resize: vertical; min-height: 90px; }
-.compose-footer { display: flex; justify-content: flex-end; margin-top: 0.85rem; }
-
-/* ── Sidebar ── */
-.ak-sidebar { position: sticky; top: calc(56px + 1.5rem); display: flex; flex-direction: column; gap: 1rem; }
-.weather-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.28); }
-.weather-country-header { display: flex; align-items: center; justify-content: space-between; padding: 0.9rem 1.1rem 0.7rem; border-bottom: 1px solid var(--border); }
-.country-name { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
-.weather-date { font-size: 0.7rem; color: var(--muted); }
-.weather-headline { display: flex; align-items: baseline; gap: 0.6rem; padding: 0.85rem 1.1rem 0.7rem; border-bottom: 1px solid var(--border); }
-.temp-big { font-size: 2rem; font-weight: 700; color: var(--text); line-height: 1; letter-spacing: -0.03em; }
-.temp-range { font-size: 0.8rem; color: var(--muted); line-height: 1.5; }
-.precip-headline { margin-left: auto; text-align: right; font-size: 0.78rem; color: var(--muted); line-height: 1.6; }
-.precip-headline strong { font-size: 1.05rem; color: var(--text); font-weight: 600; display: block; }
-.weather-points { padding: 0.5rem 0; max-height: 220px; overflow-y: auto; }
-.weather-points::-webkit-scrollbar { width: 4px; }
-.weather-points::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-.wp-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 0.5rem; padding: 0.35rem 1.1rem; font-size: 0.78rem; transition: background 0.12s; }
-.wp-row:hover { background: rgba(255,255,255,0.03); }
-.wp-name { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.wp-temp { color: var(--text); font-weight: 600; white-space: nowrap; }
-.wp-precip { color: var(--muted); white-space: nowrap; }
-.no-data { padding: 1.5rem 1.1rem; color: var(--muted); font-size: 0.85rem; text-align: center; }
-
-/* ── Sidebar revision link ── */
-.sidebar-link {
-    display: block; text-align: center; padding: 0.6rem;
-    font-size: 0.78rem; color: var(--muted); border-radius: 7px;
-    background: var(--surface); border: 1px solid var(--border);
-    transition: color 0.15s, background 0.15s;
-}
-.sidebar-link:hover { color: var(--accent); background: rgba(74,158,255,0.07); text-decoration: none; }
-
-.feed-empty { background: var(--surface); border: 1px dashed var(--border); border-radius: 8px; padding: 2.5rem; text-align: center; color: var(--muted); font-size: 0.9rem; }
-</style>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" defer></script>
 {% endblock %}
-
 
 {% block content %}
 
-<div class="page-header">
-    <h1>Aktuality</h1>
-    <p>Poznámky a sdílené postřehy týmu</p>
-</div>
-
-{# ── Since-login banner ── #}
-{% if since_login %}
-<div class="since-banner">
-    <span>📡</span>
-    <span>
-        Od posledního přihlášení: <strong>{{ since_login.batch_count }} nových snímků předpovědi</strong>
-        {% if since_login.cz_delta is not None %}
-            &nbsp;·&nbsp; ČR dnes {% if since_login.cz_delta > 0 %}+{% endif %}{{ since_login.cz_delta }} °C
-        {% endif %}
-        {% if since_login.sk_delta is not None %}
-            · SR {% if since_login.sk_delta > 0 %}+{% endif %}{{ since_login.sk_delta }} °C
-        {% endif %}
-    </span>
+{# ── Hero: national temperatures ── #}
+{% if forecast_date %}
+<div class="hero">
+    <div class="hero-temps">
+        <div class="hero-nation">
+            <div class="hero-label">ČESKO</div>
+            <div class="hero-num">{% if cz_avg.temperature_max is not None %}{{ cz_avg.temperature_max|temp_round }}°{% else %}—{% endif %}</div>
+            <div class="hero-cond">
+                {% if cz_points %}{{ cz_points|length }} bod{% if cz_points|length >= 5 %}ů{% elif cz_points|length >= 2 %}y{% else %}{% endif %}{% endif %}
+                · {{ forecast_date|date:"j. n. Y" }}
+            </div>
+        </div>
+        <div class="hero-nation" style="text-align:right">
+            <div class="hero-label">SLOVENSKO</div>
+            <div class="hero-num">{% if sk_avg.temperature_max is not None %}{{ sk_avg.temperature_max|temp_round }}°{% else %}—{% endif %}</div>
+            <div class="hero-cond" style="justify-content:flex-end">
+                {% if sk_points %}{{ sk_points|length }} bod{% if sk_points|length >= 5 %}ů{% elif sk_points|length >= 2 %}y{% else %}{% endif %}{% endif %}
+            </div>
+        </div>
+    </div>
 </div>
 {% endif %}
 
-{# ── Filter chips ── #}
-<div class="filter-bar">
-    {% for value, label in filter_chips %}
-        <a href="?autor={{ value }}"
-           class="chip {% if active_filter == value %}active{% endif %}">
-            {{ label }}
-        </a>
-    {% endfor %}
+{# ── Temperature chart ── #}
+<div class="card">
+    <div class="card-title">Vývoj teploty <span class="hint">ČR + SK průměr</span></div>
+    <div class="seg">
+        <button class="on" id="seg-aktualni">Aktuální<small>1–16 dní</small></button>
+        <button class="soon" title="Data se sbírají od této verze">Střednědobá<small>14–46 dní · sbírá se</small></button>
+        <button class="soon" title="Data se sbírají od této verze">Dlouhodobá<small>6 měsíců · sbírá se</small></button>
+    </div>
+    <div class="chart-wrap">
+        <div id="main-chart"></div>
+        <div class="chart-soon" id="chart-soon">
+            🗂 Data se sbírají — zobrazení dostupné jakmile budou první snímky
+        </div>
+    </div>
 </div>
 
+{# ── Two-column layout: notes feed + sidebar ── #}
 <div class="ak-grid">
 
     {# ════ LEFT — notes feed ════ #}
     <div>
-        <p class="section-label">Poznámky</p>
+        <div class="eyebrow">Aktuality</div>
+
+        {# Since-login banner — only on mobile / above feed #}
+        {% if since_login %}
+        <p class="page-sub">
+            naposledy přihlášen(a) {{ request.user.last_login|date:"j. n. Y, H:i" }}
+            · <strong style="color:var(--accent)">{{ since_login.batch_count }} nových snímků</strong>
+        </p>
+        {% endif %}
+
+        {# Filter chips #}
+        <div class="filter-bar">
+            {% for value, label in filter_chips %}
+                <a href="?autor={{ value }}"
+                   class="chip {% if active_filter == value %}active{% endif %}">
+                    {{ label }}
+                </a>
+            {% endfor %}
+        </div>
 
         {% if not notes %}
             <div class="feed-empty">Žádné poznámky pro zvolený filtr.</div>
@@ -203,22 +85,21 @@
                 <div class="note-meta">
                     {% if note.is_system %}
                         <span class="note-author is-system">Systém</span>
+                        <span class="note-dot">·</span>
+                        {% if note.note_type == "system_change" %}
+                            <span class="note-badge badge-change">změna</span>
+                        {% elif note.note_type == "system_outlook" %}
+                            <span class="note-badge badge-outlook">výhled</span>
+                        {% endif %}
                     {% elif note.author.role == "leader" %}
                         <span class="note-author is-leader">{{ note.author.username }}</span>
                     {% else %}
                         <span class="note-author">{{ note.author.username }}</span>
                     {% endif %}
-
-                    <span class="note-dot">●</span>
+                    <span class="note-dot">·</span>
                     <span class="note-time">{{ note.created_at|date:"j. n. Y, H:i" }}</span>
-
                     {% if note.is_pinned %}
-                        <span class="note-badge badge-pinned">Připnuto</span>
-                    {% endif %}
-                    {% if note.note_type == "system_change" %}
-                        <span class="note-badge badge-change">Systém</span>
-                    {% elif note.note_type == "system_outlook" %}
-                        <span class="note-badge badge-outlook">Výhled</span>
+                        <span class="note-badge badge-pinned">📌 připnuto</span>
                     {% endif %}
                 </div>
 
@@ -244,96 +125,234 @@
                         {% endif %}
                     </div>
                 {% endif %}
-
             </div>
         {% endfor %}
 
-        <div class="compose-card">
-            <p class="section-label" style="margin-bottom:0.75rem;">Nová poznámka</p>
+        {# Inline composer #}
+        <div class="card" style="margin-top:4px;">
             <form method="post" action="{% url 'notes:create' %}">
                 {% csrf_token %}
-                {{ form.body }}
-                <div class="compose-footer">
-                    <button type="submit" class="btn btn-primary">Přidat</button>
+                <div class="composer">
+                    <input type="text" name="body" placeholder="Nová poznámka…" required
+                           autocomplete="off">
+                    <button type="submit" class="composer-btn">Přidat</button>
                 </div>
             </form>
         </div>
     </div>
 
-    {# ════ RIGHT — weather sidebar ════ #}
+    {# ════ RIGHT — sidebar ════ #}
     <aside class="ak-sidebar">
-        <p class="section-label">Aktuální počasí</p>
 
-        {% if not forecast_date %}
-            <div class="weather-card"><div class="no-data">Žádná data o počasí.</div></div>
-        {% else %}
-
-            <div class="weather-card">
-                <div class="weather-country-header">
-                    <span class="country-name">Česká republika</span>
-                    <span class="weather-date">{{ forecast_date|date:"j. n. Y" }}</span>
-                </div>
-                {% if cz_avg %}
-                    <div class="weather-headline">
-                        <div>
-                            <div class="temp-big">{% if cz_avg.temperature_max is not None %}{{ cz_avg.temperature_max }}&thinsp;°C{% else %}—{% endif %}</div>
-                            <div class="temp-range">min&thinsp;{% if cz_avg.temperature_min is not None %}{{ cz_avg.temperature_min }}&thinsp;°C{% else %}—{% endif %}</div>
-                        </div>
-                        <div class="precip-headline">
-                            <span style="font-size:0.7rem;">Srážky</span>
-                            <strong>{% if cz_avg.precipitation_sum is not None %}{{ cz_avg.precipitation_sum }}&thinsp;mm{% else %}—{% endif %}</strong>
-                        </div>
-                    </div>
-                    <div class="weather-points">
-                        {% for row in cz_points %}
-                            <div class="wp-row">
-                                <span class="wp-name">{{ row.point.name }}</span>
-                                <span class="wp-temp">{% if row.temperature_max is not None %}{{ row.temperature_max }}&thinsp;°C{% else %}—{% endif %}</span>
-                                <span class="wp-precip">{% if row.precipitation_sum is not None %}{{ row.precipitation_sum }}&thinsp;mm{% else %}—{% endif %}</span>
-                            </div>
-                        {% endfor %}
-                    </div>
+        {# Since-login delta card #}
+        {% if since_login %}
+        <div class="card">
+            <div class="card-title">Od posledního přihlášení</div>
+            {% if since_login.cz_delta is not None %}
+            <div class="delta-row">
+                <span>Česká republika — dnes</span>
+                {% if since_login.cz_delta > 0 %}
+                    <span class="d-chip d-chip-up">+{{ since_login.cz_delta }} °C</span>
+                {% elif since_login.cz_delta < 0 %}
+                    <span class="d-chip d-chip-down">{{ since_login.cz_delta }} °C</span>
                 {% else %}
-                    <div class="no-data">Žádná data pro CZ.</div>
+                    <span class="d-chip d-chip-flat">beze změny</span>
                 {% endif %}
             </div>
-
-            <div class="weather-card">
-                <div class="weather-country-header">
-                    <span class="country-name">Slovensko</span>
-                    <span class="weather-date">{{ forecast_date|date:"j. n. Y" }}</span>
-                </div>
-                {% if sk_avg %}
-                    <div class="weather-headline">
-                        <div>
-                            <div class="temp-big">{% if sk_avg.temperature_max is not None %}{{ sk_avg.temperature_max }}&thinsp;°C{% else %}—{% endif %}</div>
-                            <div class="temp-range">min&thinsp;{% if sk_avg.temperature_min is not None %}{{ sk_avg.temperature_min }}&thinsp;°C{% else %}—{% endif %}</div>
-                        </div>
-                        <div class="precip-headline">
-                            <span style="font-size:0.7rem;">Srážky</span>
-                            <strong>{% if sk_avg.precipitation_sum is not None %}{{ sk_avg.precipitation_sum }}&thinsp;mm{% else %}—{% endif %}</strong>
-                        </div>
-                    </div>
-                    <div class="weather-points">
-                        {% for row in sk_points %}
-                            <div class="wp-row">
-                                <span class="wp-name">{{ row.point.name }}</span>
-                                <span class="wp-temp">{% if row.temperature_max is not None %}{{ row.temperature_max }}&thinsp;°C{% else %}—{% endif %}</span>
-                                <span class="wp-precip">{% if row.precipitation_sum is not None %}{{ row.precipitation_sum }}&thinsp;mm{% else %}—{% endif %}</span>
-                            </div>
-                        {% endfor %}
-                    </div>
+            {% endif %}
+            {% if since_login.sk_delta is not None %}
+            <div class="delta-row">
+                <span>Slovensko — dnes</span>
+                {% if since_login.sk_delta > 0 %}
+                    <span class="d-chip d-chip-up">+{{ since_login.sk_delta }} °C</span>
+                {% elif since_login.sk_delta < 0 %}
+                    <span class="d-chip d-chip-down">{{ since_login.sk_delta }} °C</span>
                 {% else %}
-                    <div class="no-data">Žádná data pre SK.</div>
+                    <span class="d-chip d-chip-flat">beze změny</span>
                 {% endif %}
             </div>
-
+            {% endif %}
+            {% if not since_login.cz_delta and not since_login.sk_delta %}
+            <div class="delta-row"><span style="color:var(--muted); font-size:12px;">Zatím málo snímků pro srovnání.</span></div>
+            {% endif %}
+        </div>
         {% endif %}
 
-        <a href="{% url 'notes:revision_tracker' %}" class="sidebar-link">
-            Revize předpovědí →
-        </a>
-    </aside>
+        {# Revision tracker link card #}
+        <div class="card">
+            <div class="card-title">Revize předpovědí <span class="hint">porovnání snímků</span></div>
+            <div style="font-size:12px; color:var(--muted); margin-bottom:10px;">
+                Sleduje, jak se předpověď mění den po dni pro každý bod.
+            </div>
+            <a href="{% url 'notes:revision_tracker' %}" class="btn btn-ghost btn-full">
+                Zobrazit revize →
+            </a>
+        </div>
 
+        {# Current weather — CZ #}
+        {% if forecast_date %}
+        <div class="weather-card">
+            <div class="weather-country-header">
+                <span class="country-name">Česká republika</span>
+                <span class="weather-date">{{ forecast_date|date:"j. n. Y" }}</span>
+            </div>
+            {% if cz_avg %}
+                <div class="weather-headline">
+                    <div>
+                        <div class="temp-big">{% if cz_avg.temperature_max is not None %}{{ cz_avg.temperature_max }}&thinsp;°C{% else %}—{% endif %}</div>
+                        <div class="temp-range">min&thinsp;{% if cz_avg.temperature_min is not None %}{{ cz_avg.temperature_min }}&thinsp;°C{% else %}—{% endif %}</div>
+                    </div>
+                    <div class="precip-headline">
+                        <span>Srážky</span>
+                        <strong>{% if cz_avg.precipitation_sum is not None %}{{ cz_avg.precipitation_sum }}&thinsp;mm{% else %}—{% endif %}</strong>
+                    </div>
+                </div>
+                <div class="weather-points">
+                    {% for row in cz_points %}
+                        <div class="wp-row">
+                            <span class="wp-name">{{ row.point.name }}</span>
+                            <span class="wp-temp">{% if row.temperature_max is not None %}{{ row.temperature_max }}&thinsp;°C{% else %}—{% endif %}</span>
+                            <span class="wp-precip">{% if row.precipitation_sum is not None %}{{ row.precipitation_sum }}&thinsp;mm{% else %}—{% endif %}</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="no-data">Žádná data pro CZ.</div>
+            {% endif %}
+        </div>
+
+        {# Current weather — SK #}
+        <div class="weather-card">
+            <div class="weather-country-header">
+                <span class="country-name">Slovensko</span>
+                <span class="weather-date">{{ forecast_date|date:"j. n. Y" }}</span>
+            </div>
+            {% if sk_avg %}
+                <div class="weather-headline">
+                    <div>
+                        <div class="temp-big">{% if sk_avg.temperature_max is not None %}{{ sk_avg.temperature_max }}&thinsp;°C{% else %}—{% endif %}</div>
+                        <div class="temp-range">min&thinsp;{% if sk_avg.temperature_min is not None %}{{ sk_avg.temperature_min }}&thinsp;°C{% else %}—{% endif %}</div>
+                    </div>
+                    <div class="precip-headline">
+                        <span>Srážky</span>
+                        <strong>{% if sk_avg.precipitation_sum is not None %}{{ sk_avg.precipitation_sum }}&thinsp;mm{% else %}—{% endif %}</strong>
+                    </div>
+                </div>
+                <div class="weather-points">
+                    {% for row in sk_points %}
+                        <div class="wp-row">
+                            <span class="wp-name">{{ row.point.name }}</span>
+                            <span class="wp-temp">{% if row.temperature_max is not None %}{{ row.temperature_max }}&thinsp;°C{% else %}—{% endif %}</span>
+                            <span class="wp-precip">{% if row.precipitation_sum is not None %}{{ row.precipitation_sum }}&thinsp;mm{% else %}—{% endif %}</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="no-data">Žádná data pre SK.</div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {# Year-over-year lock / coming-soon #}
+        {% if not has_historical %}
+        <div class="lock-card">
+            🔒 Meziroční srovnání — zobrazí se po doplnění historických dat (ERA5).
+            Spusťte <code style="background:rgba(74,158,255,.12); color:var(--accent); padding:1px 5px; border-radius:3px; font-size:11px;">fetch_era5_backfill</code> pro první data.
+        </div>
+        {% endif %}
+
+    </aside>
 </div>
+
+{% endblock %}
+
+{% block extra_js %}
+{{ chart_json|json_script:"chart-data" }}
+<script>
+(function () {
+    const raw = JSON.parse(document.getElementById('chart-data').textContent);
+    const traces = [];
+
+    if (raw.cz && raw.cz.length) {
+        traces.push({
+            x: raw.cz.map(d => d.date),
+            y: raw.cz.map(d => d.temp),
+            type: 'scatter', mode: 'lines', name: 'ČR',
+            line: { color: '#4A9EFF', width: 2.5, shape: 'spline' },
+            fill: 'tozeroy', fillcolor: 'rgba(74,158,255,0.10)',
+            hovertemplate: '%{y:.1f}°C<extra>ČR</extra>',
+        });
+    }
+    if (raw.sk && raw.sk.length) {
+        traces.push({
+            x: raw.sk.map(d => d.date),
+            y: raw.sk.map(d => d.temp),
+            type: 'scatter', mode: 'lines', name: 'SR',
+            line: { color: '#2DD4BF', width: 2, shape: 'spline' },
+            fill: 'tozeroy', fillcolor: 'rgba(45,212,191,0.06)',
+            hovertemplate: '%{y:.1f}°C<extra>SR</extra>',
+        });
+    }
+
+    const layout = {
+        paper_bgcolor: 'transparent',
+        plot_bgcolor:  'transparent',
+        font: { color: '#8A97AD', family: 'Inter, sans-serif', size: 10 },
+        margin: { t: 6, r: 10, b: 34, l: 36 },
+        xaxis: {
+            gridcolor: 'rgba(36,48,68,0.6)',
+            tickcolor: 'transparent',
+            tickfont: { size: 10, color: '#8A97AD' },
+            showline: false,
+            type: 'date',
+        },
+        yaxis: {
+            gridcolor: 'rgba(36,48,68,0.5)',
+            tickcolor: 'transparent',
+            tickfont: { size: 10, color: '#8A97AD' },
+            showline: false,
+            ticksuffix: '°',
+            zeroline: false,
+        },
+        legend: {
+            font: { size: 10, color: '#8A97AD' },
+            bgcolor: 'transparent',
+            orientation: 'h',
+            x: 0, y: 1.12,
+        },
+        hovermode: 'x unified',
+        hoverlabel: {
+            bgcolor: '#131C2E',
+            bordercolor: '#243044',
+            font: { color: '#E8EDF5', size: 12 },
+        },
+    };
+
+    const config = { displayModeBar: false, responsive: true };
+
+    if (traces.length) {
+        Plotly.newPlot('main-chart', traces, layout, config);
+    } else {
+        document.getElementById('main-chart').style.display = 'none';
+        document.getElementById('chart-soon').style.display = 'block';
+    }
+
+    // Segmented control — "soon" buttons show coming-soon message
+    document.querySelectorAll('.seg button').forEach(btn => {
+        btn.addEventListener('click', function () {
+            if (this.classList.contains('soon')) {
+                document.querySelectorAll('.seg button').forEach(b => b.classList.remove('on'));
+                this.classList.add('on');
+                document.getElementById('main-chart').style.display = 'none';
+                document.getElementById('chart-soon').style.display = 'block';
+            } else {
+                document.querySelectorAll('.seg button').forEach(b => b.classList.remove('on'));
+                this.classList.add('on');
+                document.getElementById('main-chart').style.display = '';
+                document.getElementById('chart-soon').style.display = 'none';
+            }
+        });
+    });
+}());
+</script>
 {% endblock %}

@@ -30,10 +30,13 @@ def _get_system_user():
     return User.objects.filter(is_superuser=True).order_by("pk").first()
 
 
-def _already_ran_today():
+def _already_ran_today(country_label):
+    # Per-country check so CZ and SK are independent — if one ran but the other
+    # didn't (e.g. no data), a re-run can still fill the missing country.
     return Note.objects.filter(
         note_type=Note.TYPE_SYSTEM_OUTLOOK,
         created_at__date=date.today(),
+        body__contains=f"Výhled {country_label}",
     ).exists()
 
 
@@ -85,10 +88,6 @@ class Command(BaseCommand):
     help = "Generate system_outlook notes from current short-range forecast. Runs once per day."
 
     def handle(self, *args, **options):
-        if _already_ran_today():
-            self.stdout.write("Outlook notes already generated today, skipping.")
-            return
-
         author = _get_system_user()
         if not author:
             self.stderr.write("No superuser found. Aborting.")
@@ -97,6 +96,10 @@ class Command(BaseCommand):
         created = 0
 
         for country, country_label in [("CZ", "ČR"), ("SK", "SR")]:
+            if _already_ran_today(country_label):
+                self.stdout.write(f"  {country}: outlook note already exists today, skipping.")
+                continue
+
             series = _get_latest_7day_series(country)
             if not series:
                 continue
