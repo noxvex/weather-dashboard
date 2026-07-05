@@ -1,0 +1,263 @@
+:root {
+    --bg:      #0A0E1A;
+    --surface: #131C2E;
+    --border:  #243044;
+    --text:    #E8EDF5;
+    --muted:   #8A97AD;
+    --accent:  #4A9EFF;
+    --red:     #F87171;
+    --teal:    #2DD4BF;
+
+    --radius:  6px;
+    --nav-h:   56px;
+}
+
+/* ── Reset & base ─────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    min-height: 100vh;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ── Top nav bar ──────────────────────────────────────── */
+.nav {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: var(--nav-h);
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 1.5rem;
+    gap: 2rem;
+    z-index: 100;
+}
+
+.nav-brand {
+    font-weight: 700;
+    font-size: 1rem;
+    color: var(--text);
+    letter-spacing: 0.02em;
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.nav-brand .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    display: inline-block;
+}
+
+.nav-links {
+    display: flex;
+    gap: 0.25rem;
+    flex: 1;
+}
+
+.nav-links a {
+    color: var(--muted);
+    padding: 0.35rem 0.8rem;
+    border-radius: var(--radius);
+    font-size: 0.9rem;
+    transition: color 0.15s, background 0.15s;
+}
+
+.nav-links a:hover,
+.nav-links a.active {
+    color: var(--text);
+    background: var(--border);
+    text-decoration: none;
+}
+
+.nav-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+
+.nav-right a { color: var(--muted); }
+.nav-right a:hover { color: var(--text); text-decoration: none; }
+
+/* ── Page wrapper (offset for fixed nav) ─────────────── */
+.page-wrap {
+    padding-top: calc(var(--nav-h) + 2rem);
+    padding-bottom: 3rem;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+}
+
+/* ── Page header with subtle gradient ────────────────── */
+.page-header {
+    padding: 2rem 0 1.5rem;
+    margin-bottom: 1.5rem;
+    background: linear-gradient(
+        to bottom,
+        rgba(74, 158, 255, 0.07) 0%,
+        transparent 100%
+    );
+    border-radius: var(--radius);
+    padding-left: 1.25rem;
+    padding-right: 1.25rem;
+}
+
+.page-header h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text);
+}
+
+.page-header p {
+    color: var(--muted);
+    margin-top: 0.25rem;
+    font-size: 0.9rem;
+}
+
+/* ── Cards / surfaces ─────────────────────────────────── */
+.card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.28), 0 1px 2px rgba(0,0,0,0.16);
+    transition: box-shadow 0.2s;
+}
+
+.card + .card { margin-top: 1rem; }
+
+/* ── Buttons ──────────────────────────────────────────── */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.55rem 1.1rem;
+    border-radius: var(--radius);
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    transition: opacity 0.15s, background 0.15s;
+    text-decoration: none;
+}
+
+.btn:hover { opacity: 0.88; text-decoration: none; }
+
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-danger  { background: var(--red);    color: #fff; }
+.btn-ghost   {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+}
+.btn-ghost:hover { color: var(--text); background: var(--border); }
+.btn-full { width: 100%; }
+
+/* ── Form inputs ──────────────────────────────────────── */
+label {
+    display: block;
+    font-size: 0.82rem;
+    color: var(--muted);
+    margin-bottom: 0.3rem;
+    margin-top: 1.1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+input[type=text],
+input[type=password],
+input[type=email],
+select,
+textarea {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    padding: 0.6rem 0.75rem;
+    font-size: 0.95rem;
+    transition: border-color 0.15s;
+    outline: none;
+}
+
+input[type=text]:focus,
+input[type=password]:focus,
+input[type=email]:focus,
+select:focus,
+textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(74,158,255,0.15);
+}
+
+/* ── Alerts / messages ────────────────────────────────── */
+.alert {
+    padding: 0.8rem 1rem;
+    border-radius: var(--radius);
+    font-size: 0.9rem;
+    margin-top: 1rem;
+}
+
+.alert-error {
+    background: rgba(248,113,113,0.12);
+    border: 1px solid rgba(248,113,113,0.35);
+    color: var(--red);
+}
+
+.alert-info {
+    background: rgba(74,158,255,0.10);
+    border: 1px solid rgba(74,158,255,0.3);
+    color: var(--accent);
+}
+
+.alert p { margin-top: 0.35rem; font-size: 0.82rem; color: var(--muted); }
+
+/* ── Login-specific layout ────────────────────────────── */
+.login-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 2rem;
+}
+
+.login-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 2.25rem 2rem;
+    width: 100%;
+    max-width: 380px;
+}
+
+.login-card h1 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+}
+
+.login-card .subtitle {
+    font-size: 0.83rem;
+    color: var(--muted);
+    margin-bottom: 0.5rem;
+}
+
+/* ── Dividers & misc ──────────────────────────────────── */
+hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
+
+.text-muted { color: var(--muted); font-size: 0.85rem; }
+.text-accent { color: var(--accent); }
+.text-red    { color: var(--red); }
+.text-teal   { color: var(--teal); }

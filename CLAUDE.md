@@ -1,169 +1,129 @@
-# Weather Dashboard — Marketing Team (CZ/SK)
+# Phase 4 Build Brief — Weather Dashboard
 
-## Project Overview
-Internal web tool for a marketing team (10 people) covering Czechia and Slovakia.
-Purpose: help the team plan sales/promo timing around weather patterns, seasonal
-trends, and historical analogs. Humans make the calls — the app surfaces data,
-suggestions, and history; it does not automate any decisions.
+Paste this into a fresh Claude Code chat. Read fully before writing code. Ask me
+anything ambiguous before generating files. I'm a Python/Django beginner — explain
+non-obvious decisions briefly as you go (docstrings/comments are fine for this).
 
-**Builder context:** The person building this is a Python/Django beginner.
-Explain reasoning briefly before/while writing code. This is a real production
-tool for a real company, not a practice project — code quality matters.
+## Scope of this phase
 
-**Languages:** All UI, reports, and alerts are in **Czech**. All code, comments,
-commit messages, and variable names are in **English**.
+Data collection pipelines for ALL forecast horizons + historical baseline, PLUS the
+UI/logic that's achievable with data we already have. Medium/long-range and pollen
+UI screens are NOT built yet — data collection starts now so it has time to
+accumulate, screens come in a later phase.
 
----
+## 1. New data sources (all Open-Meteo, dev = no API key)
 
-## Tech Stack
-- **Backend:** Django (auth, password hashing, admin panel)
-- **Frontend:** Django HTML templates + vanilla JavaScript, Plotly.js for charts
-  (built-in PNG export)
-- **Database:** PostgreSQL, hosted on Railway
-- **Scheduled ingest:** Django management commands, triggered by Railway Cron
-  Service (no Celery — deliberately lean for a 10-user tool)
-- **Excel/CSV export:** server-side via pandas
-- **Hosting:** Railway (Hobby plan, $5/mo, usage-based)
+| Source | Base URL env var | Endpoint |
+|---|---|---|
+| Existing short-range | `OPEN_METEO_BASE_URL` (already set) | `/v1/forecast` |
+| Medium+seasonal | `OPEN_METEO_SEASONAL_URL` | `https://seasonal-api.open-meteo.com/v1/forecast` |
+| Historical (ERA5) | `OPEN_METEO_ARCHIVE_URL` | `https://archive-api.open-meteo.com/v1/archive` |
+| Pollen/air quality | `OPEN_METEO_AIRQUALITY_URL` | `https://air-quality-api.open-meteo.com/v1/air-quality` |
 
-## Non-Negotiables
-- Secrets **never** committed — everything sensitive lives in `.env`, which is
-  git-ignored
-- Database backups must be on
-- Passwords are hashed (Django's default hasher), never stored plain
-- Free-tier vs paid-tier API/hosting keys are swapped via `.env` only —
-  **zero code changes** required to go from dev to production
+All follow the same customer-api + key swap pattern as the existing forecast source
+— add matching `_API_KEY` env vars (blank in dev) for each, unused until production.
 
----
+## 2. Model changes
 
-## Data Sources
+**Extend existing forecast model** (or add if not already present):
+- `target_date` (date the forecast is FOR)
+- `issued_at` (timestamp the forecast was FETCHED) — append-only, never overwrite
+- This pair is what makes revision tracking possible: compare rows with the same
+  `target_date` and different `issued_at`.
 
-### Weather — Open-Meteo (commercial tier)
-One consistent JSON schema across all endpoints. Base URL and API key are read
-from `.env` so we can develop against the free tier and flip to paid later:
-- **Dev/now:** `https://api.open-meteo.com` — free, non-commercial, no key,
-  10,000 calls/day, 600/min limit
-- **Production (before go-live):** `https://customer-api.open-meteo.com` +
-  `apikey=` param — Standard tier (1M calls/month)
+**New: `MediumLongRangeForecast`**
+- point (FK), target_date, issued_at, horizon (`ec46` or `seas5`), temp_mean,
+  temp_anomaly, precip_probability, source_model
+- Populated by scheduled fetch, no UI yet.
 
-Horizons pulled, all in one schema:
-- **Short:** 7–16 days
-- **Mid:** up to 6 weeks (EC46)
-- **Long:** up to ~7 months (SEAS5)
-- **Historical actuals:** ERA5 reanalysis back to 2015 (full backfill on
-  Phase 1, all 22 points, all variables)
+**New: `HistoricalActual`**
+- point (FK), date, temp_min, temp_max, precip_mm, wind_kmh
+- One-time backfill command + ongoing daily append so "today" eventually becomes
+  history too.
 
-### Pollen & Air Quality — CAMS (via Open-Meteo Air Quality API)
-- CZ + SK national level only, 5-day maximum forecast
-- Unified panel shown on the short-range view
-- Static seasonal-tendency calendar layer (e.g. "birch peaks late April") shown
-  on mid/long views where live pollen data doesn't reach
+**New: `PollenRecord`**
+- point (FK), date, issued_at, birch, grass, ragweed, alder, mugwort (whichever
+  CAMS returns for CZ/SK domain), aqi_european
+- Forecast-only, 5-day horizon, no backfill possible.
 
-### Historical Warnings — ČHMÚ
-- Layered in later (Phase 9), not part of initial build
+**Extend `Note` model:**
+- `note_type` field: `human`, `system_change`, `system_outlook` (badge color logic:
+  human = author-based/yxes-red, system_change = teal "systém", system_outlook =
+  teal "výhled" — same color, different label per the mockup)
+- `save()` override: if `note_type` starts with `system_`, force `is_pinned=True`
+  automatically, no manual step.
 
-### Accuracy Dataset (proprietary, grows over time)
-- Every forecast is stored alongside the eventual real actual once it occurs
-- Accuracy-history seed: 2021–2024, grows from launch forward
-- Powers comparison graphs on the History screen
+## 3. Management commands
 
----
+- `fetch_seasonal` — daily pull from seasonal-api for all 22 points, stores to
+  `MediumLongRangeForecast`
+- `fetch_era5_backfill` — one-time, date-range argument, populates `HistoricalActual`
+  from archive-api (start conservative — e.g. last 2 years — then widen; don't pull
+  decades in one run against free tier without testing volume first)
+- `fetch_pollen` — daily pull from air-quality-api, stores to `PollenRecord`
+- `detect_changes` (extends/creates) — runs against short-range forecast history:
+  - Swing: temp range ≥5°C within any rolling 7-day window → `system_change` note
+  - Heat wave: 3+ consecutive days ≥30°C → `system_change` note
+  - Rain flip: dry→wet or wet→dry day-to-day transition → `system_change` note
+  - Revision delta: same `target_date`, new `issued_at` vs previous → store delta,
+    surface via revision-tracker view (not necessarily a note for every tiny change —
+    use a threshold, e.g. only auto-note deltas ≥3°C, to avoid spam)
+- `generate_outlook_notes` (new) — reads current short-range forecast (0–16 days,
+  data already available, no new source needed):
+  - Rain probability >60% next 7 days → "Očekáváme déšť v následujícím týdnu"
+  - Rain probability <20% next 7 days → "Očekáváme sucho v následujícím týdnu"
+  - Temp trending toward heat-wave threshold but not yet confirmed → hedge language,
+    e.g. "Teploty se blíží k tropickým hodnotám, ale predikce se může změnit"
+  - ALWAYS hedge with probabilistic wording ("očekáváme", "může", "nelze vyloučit")
+    per locked principle — never state medium/long-range as certain
+  - `note_type='system_outlook'`
 
-## Data Model: Points vs. National Aggregate
-- **22 regional points** (CZ + SK) are the underlying granular data — pulled,
-  stored, and used to feed the map + regional drill-down + accuracy dataset
-- **National CZ and SK aggregates** (computed average across each country's
-  points) are the **headline numbers** shown on the Landing screen — the app
-  targets whole-country planning, not regional
-- Map + individual regional points are available as a drill-down layer under
-  the national figures
+  NOT included yet (needs ERA5 baseline, defer to when HistoricalActual has enough
+  data): "it should have rained but didn't" style anomaly-vs-normal detection. Once
+  `HistoricalActual` has enough rows to compute a climatological average per point/
+  time-of-year, this becomes a straightforward comparison — don't build it blind now.
 
----
+## 4. Views / templates
 
-## Roles & Auth
-- **noxvex** — ADMIN. Django superuser. Creates all accounts, full control.
-- **yxes** — LEADER. Can moderate/edit/delete ANY note (not just their own).
-  Notes authored by yxes are shown in RED and pinned to top.
-- **Workers** — named accounts. Can edit/delete only their own notes.
-- **Login:** username = first name, lowercase. Password set initially by
-  admin; user changes it after first login.
-- **No self-service password reset** — admin resets manually if someone is
-  locked out. Acceptable tradeoff at this team size.
-- Passwords hashed via Django's built-in hasher.
+- **Aktuality feed**: add author filter (chips: Vše / yxes / Systém / [named users]).
+  Filter is a simple queryset filter on `Note.author`, no new model needed.
+- **"Since last login" panel**: query forecast-history rows where
+  `issued_at >= request.user.last_login` per point, compare oldest-in-range vs
+  latest, list deltas. `last_login` already exists on `AbstractUser` — no new field.
+- **Revision tracker view**: three buttons (Aktuální / Střednědobá / Dlouhodobá)
+  filtering by lead-time bucket. Střednědobá/Dlouhodobá buttons render a
+  "Data se sbírá, zobrazení brzy" (data collecting, display coming soon) state —
+  they should NOT be hidden, just clearly marked not-yet-populated in UI, since the
+  underlying data IS being collected from this phase onward.
+- **Year-over-year card**: same coming-soon treatment, tied to `HistoricalActual`
+  row count reaching a usable threshold.
+- Graph placement: above the two-column Aktuality/revision layout, per approved
+  mockup (attach mockup HTML if useful reference for template structure/dark theme
+  CSS variables).
 
----
+## 5. Config / env vars to add
 
-## Screens
+```
+OPEN_METEO_SEASONAL_URL=https://seasonal-api.open-meteo.com/v1/forecast
+OPEN_METEO_SEASONAL_API_KEY=
+OPEN_METEO_ARCHIVE_URL=https://archive-api.open-meteo.com/v1/archive
+OPEN_METEO_ARCHIVE_API_KEY=
+OPEN_METEO_AIRQUALITY_URL=https://air-quality-api.open-meteo.com/v1/air-quality
+OPEN_METEO_AIRQUALITY_API_KEY=
+```
 
-### Landing / Aktuality
-- Forecast + ~5 key headline numbers (national CZ/SK aggregates), detail on
-  click
-- "What changed" section (vs. previous pull)
-- Historical-analog suggestions, **two color-coded streams**:
-  - **APP (blue)** — weather-framed analog engine, e.g. "~87% like 2022, ran
-    wetter → expect rain"
-  - **TEAM (by author)** — human marketing takes; yxes shown in red, pinned
-- Notes + tags live in the main area of this screen
-- Per-user UNREAD vs READ state on notes
+## Build order suggestion (ask me to confirm before starting if unsure)
 
-### History / Graphs
-- Year-over-year comparison
-- Selectable granularity: years / months / weeks / days
-- All weather variables selectable (pollen excluded — data only goes 5 days,
-  not useful for year comparison)
-- % similarity score, e.g. "this year ≈ 2019, 87%"
-- Tags/notes can be pinned directly to graph points
-- Downloads: PNG (chart) + Excel/CSV (data)
+1. Model changes + migrations (Note fields, target_date/issued_at, new models)
+2. Fetch commands for the 3 new sources (test each returns data before wiring UI)
+3. `detect_changes` + `generate_outlook_notes` logic
+4. Since-login query + author filter on existing Aktuality view
+5. Revision tracker view with coming-soon states
+6. Template/CSS pass matching the approved dark-theme mockup
 
----
+## Reminders
 
-## Notes & Tags
-- Shared — everyone sees everyone's notes
-- Two placements: pinned-to-graph-point, and general main-area notes
-- Tagged by topic (e.g. "promo", "weather event", "sales result")
-- New vs. read state tracked per user
-
-## Alerts
-- **09:00 Czech morning report** — leads with pollen/air quality line, then
-  "what changed," then the three horizons
-- **Immediate alert** on a big change (thresholds are tunable config values,
-  not hardcoded)
-- Delivered via email + in-app notification; Slack optional/future
-- Cron scheduling note: Railway's minimum cron frequency is 5 minutes, which
-  comfortably covers both the daily digest and threshold-triggered checks
-
----
-
-## Build Order (each phase = a working, testable thing)
-1. Setup + DB + first CZ/SK data pull
-2. Login / roles
-3. Landing / Aktuality
-4. History / graphs
-5. Notes / tags
-6. Alerts
-7. Pollen/air quality + seasonal layer
-8. Deploy (flip Open-Meteo + Railway to paid tiers here)
-9. ČHMÚ integration + accuracy graphs
-
-**Nothing gets built until the person explicitly says "build now."** Before
-that point: ask questions, flag tradeoffs honestly, suggest better approaches
-where relevant — don't assume and proceed.
-
----
-
-## Setup Status (as of last session)
-- ✅ PyCharm + Claude Code (JetBrains plugin) connected
-- ✅ GitHub account ready
-- ✅ Railway account created, project `weather-dashboard` created, PostgreSQL
-  added, `DATABASE_URL` saved in local `.env`
-- ✅ Open-Meteo: building against free tier now, will swap to
-  `customer-api.open-meteo.com` + key before Phase 8 (go-live)
-- ⬜ `.gitignore` — not yet created (needed before first commit)
-- ⬜ Django project itself — not yet started (Phase 1, awaiting "build now")
-
-## Working Conventions
-- One Django app per concern: `accounts/`, `ingest/`, `dashboard/`, `notes/`,
-  `alerts/`
-- Explain what each command/file does briefly when introducing it — the
-  person is learning Python/Django as we go
-- Before any code is written: ask clarifying questions, flag honest
-  tradeoffs, suggest alternatives. Wait for explicit "build now."
+- `.gitignore` still excludes `.env` — verify before committing new env vars
+- All UI text Czech, all code/comments English
+- Console email backend still fine, no SMTP needed for this phase
+- Commit checkpoint after each numbered step above, not one giant commit

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Přihlášení — Weather Dashboard{% endblock %}
+
+{% block content %}
+<div class="login-wrap">
+    <div class="login-card">
+        <h1>Přihlášení</h1>
+        <p class="subtitle">Weather Dashboard CZ/SK</p>
+
+        <form method="post" novalidate>
+            {% csrf_token %}
+
+            <label for="username">Uživatelské jméno</label>
+            <input type="text"
+                   id="username"
+                   name="username"
+                   autofocus
+                   autocomplete="username"
+                   value="{{ request.POST.username|default:'' }}">
+
+            <label for="password">Heslo</label>
+            <input type="password"
+                   id="password"
+                   name="password"
+                   autocomplete="current-password">
+
+            <button type="submit" class="btn btn-primary btn-full" style="margin-top:1.4rem;">
+                Přihlásit se
+            </button>
+        </form>
+
+        {% if error == "invalid" %}
+            <div class="alert alert-error">
+                Nesprávné uživatelské jméno nebo heslo.
+                <p>Zapomenuté heslo? Kontaktujte správce (noxvex).</p>
+            </div>
+        {% elif error == "locked" %}
+            <div class="alert alert-error">
+                Váš účet byl zablokován z důvodu příliš mnoha neúspěšných pokusů.
+                <p>Kontaktujte správce (noxvex) pro odemčení účtu.</p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

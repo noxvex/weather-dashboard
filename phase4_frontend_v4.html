@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Počasí — přehled</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0A0E1A; --surface:#131C2E; --border:#243044;
+    --text:#E8EDF5; --muted:#8A97AD; --accent:#4A9EFF;
+    --red:#F87171; --teal:#2DD4BF;
+  }
+  *{box-sizing:border-box; margin:0;}
+  body{
+    background:
+      radial-gradient(ellipse 120% 50% at 50% -10%, rgba(74,158,255,.14), transparent 60%),
+      linear-gradient(180deg, #0A0E1A 0%, #0D1626 45%, #0A0E1A 100%);
+    background-attachment:fixed;
+    color:var(--text); font-family:'Inter',-apple-system,sans-serif;
+    font-size:14.5px; line-height:1.55; min-height:100vh;
+  }
+  .tabbar{
+    position:sticky; top:0; z-index:20; display:flex;
+    background:rgba(10,14,26,.85); backdrop-filter:blur(12px);
+    border-bottom:1px solid rgba(74,158,255,.12);
+  }
+  .tabbar button{
+    flex:1; background:none; border:none; color:var(--muted); cursor:pointer;
+    padding:14px 6px; font-family:'Inter'; font-size:12px; font-weight:500;
+    border-bottom:2px solid transparent; transition:color .2s;
+  }
+  .tabbar button.active{ color:var(--accent); border-bottom-color:var(--accent); }
+  .screen{ display:none; max-width:560px; margin:0 auto; padding:22px 16px 70px; }
+  .screen.active{ display:block; animation:fade .35s ease; }
+  @keyframes fade{ from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:none;} }
+
+  .eyebrow{ font-size:11px; font-weight:600; letter-spacing:1.4px; text-transform:uppercase;
+    color:var(--accent); opacity:.85; margin-bottom:6px; }
+  .page-sub{ font-size:12px; color:var(--muted); margin-bottom:20px; }
+
+  /* HERO — atmospheric national temps */
+  .hero{
+    border-radius:20px; padding:26px 22px 20px; margin-bottom:16px;
+    background:linear-gradient(155deg, rgba(74,158,255,.16) 0%, rgba(19,28,46,.9) 45%, #101A2E 100%);
+    border:1px solid rgba(74,158,255,.18);
+    box-shadow:0 12px 40px rgba(0,0,0,.45), inset 0 1px 0 rgba(232,237,245,.06);
+  }
+  .hero-temps{ display:flex; gap:8px; }
+  .hero-nation{ flex:1; }
+  .hero-label{ font-size:11px; font-weight:600; letter-spacing:1px; color:var(--muted); }
+  .hero-num{
+    font-size:58px; font-weight:200; letter-spacing:-2px; line-height:1.05;
+    text-shadow:0 0 34px rgba(74,158,255,.35);
+  }
+  .hero-cond{ font-size:12px; color:var(--muted); display:flex; align-items:center; gap:6px; }
+
+  /* CARD base */
+  .card{
+    background:linear-gradient(165deg, #17233A 0%, #111B2F 100%);
+    border:1px solid rgba(74,158,255,.10); border-radius:16px;
+    padding:18px; margin-bottom:14px;
+    box-shadow:0 6px 22px rgba(0,0,0,.35);
+    transition:transform .18s ease, border-color .18s ease;
+  }
+  .card:hover{ transform:translateY(-1px); border-color:rgba(74,158,255,.24); }
+  .card-title{ font-size:13px; font-weight:600; margin-bottom:12px; display:flex;
+    justify-content:space-between; align-items:center; }
+  .card-title .hint{ font-size:10.5px; font-weight:400; color:var(--muted); }
+
+  /* segmented horizon control */
+  .seg{ display:flex; background:rgba(10,14,26,.6); border:1px solid var(--border);
+    border-radius:10px; padding:3px; margin-bottom:14px; }
+  .seg button{
+    flex:1; background:none; border:none; border-radius:8px; cursor:pointer;
+    color:var(--muted); font-family:'Inter'; font-size:11px; font-weight:500; padding:8px 2px;
+    transition:all .18s;
+  }
+  .seg button small{ display:block; font-size:8.5px; opacity:.7; font-weight:400; }
+  .seg button.on{
+    background:linear-gradient(160deg, rgba(74,158,255,.25), rgba(74,158,255,.10));
+    color:#fff; box-shadow:0 0 14px rgba(74,158,255,.25);
+  }
+  .seg button.soon{ opacity:.45; }
+
+  /* chart */
+  .chart svg{ width:100%; height:150px; display:block; }
+  .chart-days{ display:flex; justify-content:space-between; font-size:10px;
+    color:var(--muted); padding:4px 2px 0; }
+
+  /* delta rows */
+  .delta-row{ display:flex; justify-content:space-between; align-items:center;
+    padding:10px 0; border-bottom:1px solid rgba(36,48,68,.7); font-size:13px; }
+  .delta-row:last-child{ border-bottom:none; }
+  .chip{ font-size:11.5px; font-weight:600; padding:3px 10px; border-radius:20px; }
+  .chip-up{ background:rgba(248,113,113,.14); color:var(--red); }
+  .chip-down{ background:rgba(45,212,191,.14); color:var(--teal); }
+  .chip-flat{ background:rgba(138,151,173,.12); color:var(--muted); }
+
+  /* revision block */
+  .rev-nums{ display:flex; align-items:baseline; gap:12px; margin:4px 0 8px; }
+  .rev-nums .n{ font-size:32px; font-weight:300; }
+  .rev-nums .arrow{ color:var(--muted); }
+  .bar{ height:5px; border-radius:4px; background:rgba(36,48,68,.9); overflow:hidden; margin-top:10px; }
+  .bar i{ display:block; height:100%; border-radius:4px;
+    background:linear-gradient(90deg, var(--accent), #7FBCFF);
+    box-shadow:0 0 10px rgba(74,158,255,.5); }
+  .tiny{ font-size:10.5px; color:var(--muted); margin-top:6px; }
+
+  /* notes */
+  .filters{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+  .fchip{ font-size:11px; padding:5px 12px; border-radius:20px; cursor:pointer;
+    border:1px solid var(--border); color:var(--muted); transition:all .15s; }
+  .fchip.on{ background:rgba(74,158,255,.16); border-color:rgba(74,158,255,.4); color:#fff; }
+  .note{
+    border-radius:12px; padding:12px 14px; margin-bottom:10px;
+    background:rgba(19,28,46,.55); border:1px solid rgba(36,48,68,.8);
+    border-left:3px solid var(--muted);
+    transition:transform .15s ease;
+  }
+  .note:hover{ transform:translateX(2px); }
+  .note.sys{ border-left-color:var(--teal); background:linear-gradient(90deg, rgba(45,212,191,.07), rgba(19,28,46,.55) 40%); }
+  .note.lead{ border-left-color:var(--red); background:linear-gradient(90deg, rgba(248,113,113,.07), rgba(19,28,46,.55) 40%); }
+  .note-head{ font-size:11px; color:var(--muted); margin-bottom:3px; }
+  .note-head b{ color:var(--text); }
+  .note.sys .note-head b{ color:var(--teal); }
+  .note.lead .note-head b{ color:var(--red); }
+  .note-body{ font-size:13px; }
+  .note-time{ font-size:10px; color:var(--muted); margin-top:5px; }
+  .pinmark{ color:var(--accent); }
+
+  .composer{ display:flex; gap:10px; margin-top:14px; }
+  .composer input{
+    flex:1; background:rgba(10,14,26,.6); border:1px solid var(--border); border-radius:10px;
+    color:var(--text); font-family:'Inter'; font-size:13px; padding:11px 14px; outline:none;
+    transition:border-color .15s;
+  }
+  .composer input:focus{ border-color:rgba(74,158,255,.5); }
+  .composer button{
+    background:linear-gradient(160deg, #5AA8FF, #3E8BE8); border:none; border-radius:10px;
+    color:#fff; font-family:'Inter'; font-size:13px; font-weight:600; padding:0 18px; cursor:pointer;
+    box-shadow:0 4px 14px rgba(74,158,255,.35);
+  }
+
+  .lock-card{
+    border:1px dashed rgba(74,158,255,.2); border-radius:14px; padding:14px 16px;
+    font-size:12px; color:var(--muted); background:rgba(19,28,46,.3);
+  }
+
+  /* forecast table (point detail) */
+  .fc-row{ display:flex; align-items:center; gap:12px; padding:11px 0;
+    border-bottom:1px solid rgba(36,48,68,.7); font-size:13px; }
+  .fc-row:last-child{ border:none; }
+  .fc-day{ width:64px; color:var(--muted); }
+  .fc-icon{ width:26px; text-align:center; }
+  .fc-range{ flex:1; display:flex; align-items:center; gap:8px; font-size:12.5px; }
+  .fc-track{ flex:1; height:4px; border-radius:3px; background:rgba(36,48,68,.9); position:relative; }
+  .fc-fill{ position:absolute; height:100%; border-radius:3px;
+    background:linear-gradient(90deg, #2DD4BF, #4A9EFF, #F87171); opacity:.8; }
+  .fc-rain{ width:44px; text-align:right; color:var(--accent); font-size:11.5px; }
+
+  .map-plate{
+    height:230px; border-radius:16px; margin-bottom:14px;
+    background:linear-gradient(165deg, #17233A, #0E1728);
+    border:1px solid rgba(74,158,255,.1);
+    display:flex; align-items:center; justify-content:center;
+    color:var(--muted); font-size:12px; position:relative; overflow:hidden;
+  }
+  .map-dot{ position:absolute; width:10px; height:10px; border-radius:50%;
+    background:var(--accent); box-shadow:0 0 12px rgba(74,158,255,.8); }
+</style>
+</head>
+<body>
+
+<div class="tabbar">
+  <button class="active" onclick="show(0)">Přehled</button>
+  <button onclick="show(1)">Bod — Praha</button>
+  <button onclick="show(2)">Mapa</button>
+</div>
+
+<!-- ============ SCREEN 1: MAIN DASHBOARD ============ -->
+<div class="screen active" id="s0">
+  <div class="eyebrow">Přehled počasí</div>
+  <div class="page-sub">naposledy přihlášen(a) dnes 08:12 · <b style="color:var(--accent)">3 změny</b> od té doby</div>
+
+  <div class="hero">
+    <div class="hero-temps">
+      <div class="hero-nation">
+        <div class="hero-label">ČESKO</div>
+        <div class="hero-num">17°</div>
+        <div class="hero-cond">☁️ zataženo · 14 bodů</div>
+      </div>
+      <div class="hero-nation" style="text-align:right">
+        <div class="hero-label">SLOVENSKO</div>
+        <div class="hero-num">19°</div>
+        <div class="hero-cond" style="justify-content:flex-end">🌤 polojasno · 8 bodů</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CHART with horizon toggle -->
+  <div class="card">
+    <div class="card-title">Vývoj teploty <span class="hint">ČR + SK průměr</span></div>
+    <div class="seg">
+      <button class="on">Aktuální<small>1–16 dní</small></button>
+      <button class="soon">Střednědobá<small>14–46 dní · sbírá se</small></button>
+      <button class="soon">Dlouhodobá<small>6 měsíců · sbírá se</small></button>
+    </div>
+    <div class="chart">
+      <svg viewBox="0 0 560 150" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="fillCZ" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#4A9EFF" stop-opacity=".35"/>
+            <stop offset="100%" stop-color="#4A9EFF" stop-opacity="0"/>
+          </linearGradient>
+          <linearGradient id="strokeCZ" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#2DD4BF"/>
+            <stop offset="60%" stop-color="#4A9EFF"/>
+            <stop offset="100%" stop-color="#F87171"/>
+          </linearGradient>
+        </defs>
+        <path d="M0,105 60,98 120,112 180,60 240,76 300,42 360,52 420,30 480,44 560,22 L560,150 0,150 Z" fill="url(#fillCZ)"/>
+        <path d="M0,105 60,98 120,112 180,60 240,76 300,42 360,52 420,30 480,44 560,22"
+              fill="none" stroke="url(#strokeCZ)" stroke-width="2.5" stroke-linecap="round"/>
+        <circle cx="420" cy="30" r="4" fill="#F87171"/>
+        <circle cx="420" cy="30" r="8" fill="#F87171" opacity=".25"/>
+      </svg>
+      <div class="chart-days"><span>dnes</span><span>čt</span><span>so</span><span>po</span><span>st</span><span>pá</span><span>+16 d</span></div>
+    </div>
+  </div>
+
+  <!-- SINCE LAST LOGIN -->
+  <div class="card">
+    <div class="card-title">Od posledního přihlášení</div>
+    <div class="delta-row"><span>Praha — čtvrtek</span><span class="chip chip-up">25° → 27°</span></div>
+    <div class="delta-row"><span>Ostrava — sobota</span><span class="chip chip-down">déšť → sucho</span></div>
+    <div class="delta-row"><span>Košice — úterý</span><span class="chip chip-flat">beze změny</span></div>
+  </div>
+
+  <!-- REVISION TRACKER -->
+  <div class="card">
+    <div class="card-title">Sledování revizí <span class="hint">Praha · čtvrtek</span></div>
+    <div class="rev-nums">
+      <span class="n">25°</span><span class="arrow">→</span><span class="n">27°</span>
+      <span class="chip chip-up" style="margin-left:auto">+2 °C</span>
+    </div>
+    <div class="bar"><i style="width:68%"></i></div>
+    <div class="tiny">větší změna než 68 % dosavadních revizí · přesnější po ~4 týdnech sběru</div>
+  </div>
+
+  <!-- AKTUALITY -->
+  <div class="card">
+    <div class="card-title">Aktuality</div>
+    <div class="filters">
+      <span class="fchip on">Vše</span><span class="fchip">yxes</span>
+      <span class="fchip">Systém</span><span class="fchip">Jana</span>
+    </div>
+
+    <div class="note sys">
+      <div class="note-head"><b>Systém</b> · výhled</div>
+      <div class="note-body">Očekáváme mírné počasí příští týden, ale nelze vyloučit déšť.</div>
+      <div class="note-time"><span class="pinmark">📌</span> připnuto automaticky · před 3 h</div>
+    </div>
+    <div class="note sys">
+      <div class="note-head"><b>Systém</b> · změna</div>
+      <div class="note-body">Teplota: +8 → +18 °C (čtvrtek)</div>
+      <div class="note-time"><span class="pinmark">📌</span> připnuto automaticky · před 10 min</div>
+    </div>
+    <div class="note lead">
+      <div class="note-head"><b>yxes</b></div>
+      <div class="note-body">Doporučuji akci v pátek kvůli teplu.</div>
+      <div class="note-time"><span class="pinmark">📌</span> připnuto · před 2 h</div>
+    </div>
+    <div class="note">
+      <div class="note-head"><b>Jana</b></div>
+      <div class="note-body">Sledujme sobotní déšť pro akci venku.</div>
+      <div class="note-time">před 5 h</div>
+    </div>
+
+    <div class="composer">
+      <input type="text" placeholder="Nová poznámka…">
+      <button>Přidat</button>
+    </div>
+  </div>
+
+  <div class="lock-card">🔒 Meziroční srovnání — zobrazí se po doplnění historických dat (ERA5)</div>
+</div>
+
+<!-- ============ SCREEN 2: POINT DETAIL ============ -->
+<div class="screen" id="s1">
+  <div class="eyebrow">Regionální bod</div>
+  <div class="page-sub">aktualizováno před 12 min</div>
+
+  <div class="hero">
+    <div class="hero-label">PRAHA · NYNÍ</div>
+    <div class="hero-num">18°</div>
+    <div class="hero-cond">🌧 zataženo, slabý déšť · vítr 12 km/h</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Předpověď · 7 dní</div>
+    <div class="fc-row"><span class="fc-day">Čtvrtek</span><span class="fc-icon">☀️</span>
+      <span class="fc-range">12° <span class="fc-track"><span class="fc-fill" style="left:20%;width:62%"></span></span> 25°</span>
+      <span class="fc-rain">0 %</span></div>
+    <div class="fc-row"><span class="fc-day">Pátek</span><span class="fc-icon">☀️</span>
+      <span class="fc-range">13° <span class="fc-track"><span class="fc-fill" style="left:24%;width:70%"></span></span> 27°</span>
+      <span class="fc-rain">10 %</span></div>
+    <div class="fc-row"><span class="fc-day">Sobota</span><span class="fc-icon">🌦</span>
+      <span class="fc-range">14° <span class="fc-track"><span class="fc-fill" style="left:28%;width:44%"></span></span> 22°</span>
+      <span class="fc-rain">60 %</span></div>
+    <div class="fc-row"><span class="fc-day">Neděle</span><span class="fc-icon">🌧</span>
+      <span class="fc-range">11° <span class="fc-track"><span class="fc-fill" style="left:16%;width:40%"></span></span> 19°</span>
+      <span class="fc-rain">80 %</span></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Vývoj teploty <span class="hint">16denní okno</span></div>
+    <div class="chart">
+      <svg viewBox="0 0 560 150" preserveAspectRatio="none">
+        <path d="M0,95 70,88 140,104 210,52 280,68 350,36 420,48 490,26 560,38 L560,150 0,150 Z" fill="url(#fillCZ)"/>
+        <path d="M0,95 70,88 140,104 210,52 280,68 350,36 420,48 490,26 560,38"
+              fill="none" stroke="#4A9EFF" stroke-width="2.5" stroke-linecap="round"/>
+      </svg>
+      <div class="chart-days"><span>dnes</span><span>čt</span><span>so</span><span>po</span><span>st</span><span>+16 d</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Sledování revizí <span class="hint">tento bod</span></div>
+    <div class="delta-row"><span>Čtvrtek</span><span class="chip chip-up">+2 °C od pondělí</span></div>
+    <div class="delta-row"><span>Sobota</span><span class="chip chip-down">−1 °C od středy</span></div>
+  </div>
+</div>
+
+<!-- ============ SCREEN 3: MAP ============ -->
+<div class="screen" id="s2">
+  <div class="eyebrow">Mapa bodů</div>
+  <div class="page-sub">14 ČR · 8 SK · seřazeno dle změny</div>
+
+  <div class="map-plate">
+    mapa ČR/SK — Leaflet/Plotly zde
+    <span class="map-dot" style="top:38%; left:30%"></span>
+    <span class="map-dot" style="top:52%; left:48%"></span>
+    <span class="map-dot" style="top:60%; left:72%; background:var(--red); box-shadow:0 0 12px rgba(248,113,113,.8)"></span>
+    <span class="map-dot" style="top:45%; left:60%"></span>
+  </div>
+
+  <div class="card">
+    <div class="delta-row"><span>Ostrava</span><span class="chip chip-up">21° · +3°</span></div>
+    <div class="delta-row"><span>Praha</span><span class="chip chip-up">18° · +2°</span></div>
+    <div class="delta-row"><span>Košice</span><span class="chip chip-down">20° · −1°</span></div>
+    <div class="delta-row"><span>Brno</span><span class="chip chip-flat">17° · 0°</span></div>
+  </div>
+</div>
+
+<script>
+function show(i){
+  document.querySelectorAll('.screen').forEach((el,idx)=>el.classList.toggle('active', idx===i));
+  document.querySelectorAll('.tabbar button').forEach((el,idx)=>el.classList.toggle('active', idx===i));
+}
+</script>
+</body>
+</html>
