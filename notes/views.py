@@ -1,6 +1,9 @@
 from collections import defaultdict
 from datetime import date, timedelta
 
+from django.db.models import Avg, F, Func, IntegerField
+from django.db.models.functions import ExtractIsoYear, ExtractWeek, ExtractYear
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.http import Http404
@@ -460,49 +463,85 @@ def point_detail(request):
 
 # ── Historie (ERA5 multi-year overlay) ──────────────────────────────────────
 
-def _historical_weekly(country=None, point_id=None):
-    """
-    Weekly mean temperature per (ISO year, ISO week), aggregated in SQL.
-    Mean = Avg of the daily midpoint (temp_min + temp_max) / 2.
-    Returns ~52 rows per year instead of thousands of raw daily rows.
-    """
-    from django.db.models import Avg, F
-    from django.db.models.functions import ExtractIsoYear, ExtractWeek
+class _ExtractDoy(Func):
+    """EXTRACT(DOY FROM date) — day-of-year 1–366. Django has no built-in for this."""
+    template = "EXTRACT(DOY FROM %(expressions)s)"
+    output_field = IntegerField()
 
+
+def _historical_series(country=None, point_id=None, granularity="w"):
+    """
+    Temperature series aggregated in SQL, grouped by (year, x) where x is
+    ISO week-of-year (weekly) or day-of-year (daily). Temp = Avg of the
+    daily midpoint (temp_min + temp_max) / 2 — for national aggregates this
+    also averages across all points of the country in the same GROUP BY.
+    """
     qs = HistoricalActual.objects.all()
     if point_id is not None:
         qs = qs.filter(point_id=point_id)
     elif country is not None:
         qs = qs.filter(point__country=country)
 
+    if granularity == "d":
+        # Day-of-year pairs with the calendar year
+        qs = qs.annotate(year=ExtractYear("date"), x=_ExtractDoy("date"))
+    else:
+        # ISO week pairs with the ISO year (Dec 29–31 can belong to week 1 of the next year)
+        qs = qs.annotate(year=ExtractIsoYear("date"), x=ExtractWeek("date"))
+
     return list(
-        qs.annotate(year=ExtractIsoYear("date"), week=ExtractWeek("date"))
-        .values("year", "week")
+        qs.values("year", "x")
         .annotate(temp=Avg((F("temp_min") + F("temp_max")) / 2.0))
-        .order_by("year", "week")
+        .order_by("year", "x")
     )
 
 
 @login_required
 def historie(request):
-    # Step 3 scope: national CZ aggregate, most recent FULL year only.
-    rows = _historical_weekly(country="CZ")
+    points = list(WeatherPoint.objects.order_by("country", "name"))
 
-    years = sorted({r["year"] for r in rows})
-    today = date.today()
-    # Most recent year with data that is not the current (partial) year
-    full_years = [y for y in years if y < today.year]
-    display_year = full_years[-1] if full_years else (years[-1] if years else None)
+    sel = request.GET.get("bod", "cz")
+    gran = request.GET.get("g", "w")
+    if gran not in ("w", "d"):
+        gran = "w"
 
-    series = {"year": display_year, "weeks": [], "temps": []}
-    if display_year is not None:
-        for r in rows:
-            if r["year"] == display_year and r["temp"] is not None:
-                series["weeks"].append(r["week"])
-                series["temps"].append(round(r["temp"], 1))
+    country = None
+    point_id = None
+    if sel == "cz":
+        country, selection_label = "CZ", "ČR (národní průměr)"
+    elif sel == "sk":
+        country, selection_label = "SK", "SR (národní průměr)"
+    else:
+        point = next((p for p in points if str(p.pk) == sel), None)
+        if point is None:
+            sel, country, selection_label = "cz", "CZ", "ČR (národní průměr)"
+        else:
+            point_id, selection_label = point.pk, f"{point.name} ({point.country})"
+
+    rows = _historical_series(country=country, point_id=point_id, granularity=gran)
+
+    # One trace per year: {year, x: [...], temps: [...]}
+    by_year = {}
+    for r in rows:
+        if r["temp"] is None:
+            continue
+        by_year.setdefault(r["year"], {"x": [], "temps": []})
+        by_year[r["year"]]["x"].append(int(r["x"]))
+        by_year[r["year"]]["temps"].append(round(r["temp"], 1))
+
+    chart = {
+        "granularity": gran,
+        "years": [
+            {"year": y, "x": s["x"], "temps": s["temps"]}
+            for y, s in sorted(by_year.items())
+        ],
+    }
 
     return render(request, "notes/historie.html", {
-        "chart_json": series,  # raw dict — json_script serializes it (never pre-dump!)
-        "display_year": display_year,
-        "has_data": bool(series["weeks"]),
+        "chart_json": chart,  # raw dict — json_script serializes it (never pre-dump!)
+        "has_data": bool(chart["years"]),
+        "points": points,
+        "sel": sel,
+        "gran": gran,
+        "selection_label": selection_label,
     })

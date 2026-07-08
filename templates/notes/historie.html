@@ -10,17 +10,37 @@
 {% block content %}
 
 <div class="eyebrow">Historie</div>
-<p class="page-sub">Týdenní průměrné teploty z historických dat ERA5 · ČR (národní průměr)</p>
+<p class="page-sub">
+    {% if gran == "d" %}Denní{% else %}Týdenní{% endif %} průměrné teploty z historických dat ERA5 · {{ selection_label }}
+</p>
+
+{# ── Controls: point selector + granularity toggle ── #}
+<form method="get" id="hist-form" style="margin-bottom:0; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+    <select name="bod" class="point-select" onchange="histSubmit(this.form)">
+        <option value="cz" {% if sel == "cz" %}selected{% endif %}>ČR — národní průměr</option>
+        <option value="sk" {% if sel == "sk" %}selected{% endif %}>SR — národní průměr</option>
+        {% for p in points %}
+            <option value="{{ p.pk }}" {% if sel == p.pk|stringformat:"s" %}selected{% endif %}>
+                {{ p.name }} ({{ p.country }})
+            </option>
+        {% endfor %}
+    </select>
+    <select name="g" class="point-select" onchange="histSubmit(this.form)">
+        <option value="w" {% if gran == "w" %}selected{% endif %}>Týdenní</option>
+        <option value="d" {% if gran == "d" %}selected{% endif %}>Denní</option>
+    </select>
+</form>
 
 <div class="card">
-    <div class="card-title">Průběh roku {{ display_year }} · týdenní průměr teploty</div>
+    <div class="card-title">Roky v překryvu · {% if gran == "d" %}den v roce{% else %}týden v roce{% endif %} · kliknutím na legendu skryjete rok</div>
     {% if has_data %}
-        <div id="hist-chart" style="width:100%; height:340px;"></div>
+        <div id="hist-loading" style="display:none; color:var(--muted); font-size:12px; padding:24px 0; text-align:center;">Načítám…</div>
+        <div id="hist-chart" style="width:100%; height:420px;"></div>
     {% else %}
         <div class="coming-soon">
             <span class="cs-icon">📊</span>
             <h3>Zatím málo dat</h3>
-            <p>Historická data nejsou k dispozici. Spusťte <code>fetch_era5_backfill</code>.</p>
+            <p>Pro tento výběr nejsou historická data k dispozici. Spusťte <code>fetch_era5_backfill</code>.</p>
         </div>
     {% endif %}
 </div>
@@ -28,20 +48,45 @@
 {% endblock %}
 
 {% block extra_js %}
+<script>
+// Show loading state while the page reloads with the new selection
+function histSubmit(form) {
+    const chart = document.getElementById('hist-chart');
+    const loading = document.getElementById('hist-loading');
+    if (chart) chart.style.opacity = '0.25';
+    if (loading) loading.style.display = 'block';
+    form.submit();
+}
+</script>
 {% if has_data %}
 {{ chart_json|json_script:"hist-chart-data" }}
 <script>
 (function () {
     const raw = JSON.parse(document.getElementById('hist-chart-data').textContent);
-    if (!raw.weeks || !raw.weeks.length) return;
+    if (!raw.years || !raw.years.length) return;
 
-    const traces = [{
-        x: raw.weeks,
-        y: raw.temps,
-        type: 'scatter', mode: 'lines', name: String(raw.year),
-        line: { color: '#4A9EFF', width: 2, shape: 'spline' },
-        hovertemplate: 'týden %{x}: %{y:.1f}°C<extra>' + raw.year + '</extra>',
-    }];
+    // Dark-theme-friendly palette; oldest years muted blues, recent years hot.
+    // The most recent year is drawn last (on top) and thicker.
+    const palette = [
+        '#3D5A80', '#4A6FA5', '#5B8BD4', '#4A9EFF', '#2DD4BF',
+        '#6EE7B7', '#FDE047', '#FBBF24', '#FB923C', '#F87171',
+        '#F472B6', '#E8EDF5',
+    ];
+    const daily = raw.granularity === 'd';
+    const last = raw.years.length - 1;
+
+    const traces = raw.years.map((yr, i) => ({
+        x: yr.x,
+        y: yr.temps,
+        type: 'scatter', mode: 'lines', name: String(yr.year),
+        line: {
+            color: palette[i % palette.length],
+            width: i === last ? 2.5 : 1.2,
+            shape: daily ? 'linear' : 'spline',
+        },
+        opacity: i === last ? 1 : 0.75,
+        hovertemplate: '%{y:.1f}°C<extra>' + yr.year + '</extra>',
+    }));
 
     const layout = {
         paper_bgcolor: 'transparent',
@@ -49,12 +94,12 @@
         font: { color: '#8A97AD', family: 'Inter, sans-serif', size: 10 },
         margin: { t: 6, r: 10, b: 34, l: 36 },
         xaxis: {
-            title: { text: 'týden v roce', font: { size: 10 } },
+            title: { text: daily ? 'den v roce' : 'týden v roce', font: { size: 10 } },
             gridcolor: 'rgba(36,48,68,0.6)',
             tickcolor: 'transparent',
             tickfont: { size: 10, color: '#8A97AD' },
             showline: false,
-            range: [1, 53],
+            range: daily ? [1, 366] : [1, 53],
         },
         yaxis: {
             gridcolor: 'rgba(36,48,68,0.5)',
@@ -67,7 +112,7 @@
         legend: {
             font: { size: 10, color: '#8A97AD' },
             bgcolor: 'transparent',
-            orientation: 'h', x: 0, y: 1.12,
+            orientation: 'h', x: 0, y: 1.14,
         },
         hovermode: 'x unified',
         hoverlabel: {
