@@ -456,3 +456,53 @@ def point_detail(request):
         "revision_deltas": revision_deltas,
         "latest_issued": latest_issued,
     })
+
+
+# ── Historie (ERA5 multi-year overlay) ──────────────────────────────────────
+
+def _historical_weekly(country=None, point_id=None):
+    """
+    Weekly mean temperature per (ISO year, ISO week), aggregated in SQL.
+    Mean = Avg of the daily midpoint (temp_min + temp_max) / 2.
+    Returns ~52 rows per year instead of thousands of raw daily rows.
+    """
+    from django.db.models import Avg, F
+    from django.db.models.functions import ExtractIsoYear, ExtractWeek
+
+    qs = HistoricalActual.objects.all()
+    if point_id is not None:
+        qs = qs.filter(point_id=point_id)
+    elif country is not None:
+        qs = qs.filter(point__country=country)
+
+    return list(
+        qs.annotate(year=ExtractIsoYear("date"), week=ExtractWeek("date"))
+        .values("year", "week")
+        .annotate(temp=Avg((F("temp_min") + F("temp_max")) / 2.0))
+        .order_by("year", "week")
+    )
+
+
+@login_required
+def historie(request):
+    # Step 3 scope: national CZ aggregate, most recent FULL year only.
+    rows = _historical_weekly(country="CZ")
+
+    years = sorted({r["year"] for r in rows})
+    today = date.today()
+    # Most recent year with data that is not the current (partial) year
+    full_years = [y for y in years if y < today.year]
+    display_year = full_years[-1] if full_years else (years[-1] if years else None)
+
+    series = {"year": display_year, "weeks": [], "temps": []}
+    if display_year is not None:
+        for r in rows:
+            if r["year"] == display_year and r["temp"] is not None:
+                series["weeks"].append(r["week"])
+                series["temps"].append(round(r["temp"], 1))
+
+    return render(request, "notes/historie.html", {
+        "chart_json": series,  # raw dict — json_script serializes it (never pre-dump!)
+        "display_year": display_year,
+        "has_data": bool(series["weeks"]),
+    })

@@ -9,5 +9,6 @@ urlpatterns = [
     path("", include("accounts.urls")),
     path("aktuality/", include("notes.urls")),
     path("bod/", notes_views.point_detail, name="bod"),
+    path("historie/", notes_views.historie, name="historie"),
     path("", RedirectView.as_view(url="/aktuality/"), name="home"),
 ]

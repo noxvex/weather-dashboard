@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}Historie — Weather Dashboard{% endblock %}
+
+{% block extra_head %}
+{# No defer: Plotly must be loaded before the inline draw script runs #}
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+{% endblock %}
+
+{% block content %}
+
+<div class="eyebrow">Historie</div>
+<p class="page-sub">Týdenní průměrné teploty z historických dat ERA5 · ČR (národní průměr)</p>
+
+<div class="card">
+    <div class="card-title">Průběh roku {{ display_year }} · týdenní průměr teploty</div>
+    {% if has_data %}
+        <div id="hist-chart" style="width:100%; height:340px;"></div>
+    {% else %}
+        <div class="coming-soon">
+            <span class="cs-icon">📊</span>
+            <h3>Zatím málo dat</h3>
+            <p>Historická data nejsou k dispozici. Spusťte <code>fetch_era5_backfill</code>.</p>
+        </div>
+    {% endif %}
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+{% if has_data %}
+{{ chart_json|json_script:"hist-chart-data" }}
+<script>
+(function () {
+    const raw = JSON.parse(document.getElementById('hist-chart-data').textContent);
+    if (!raw.weeks || !raw.weeks.length) return;
+
+    const traces = [{
+        x: raw.weeks,
+        y: raw.temps,
+        type: 'scatter', mode: 'lines', name: String(raw.year),
+        line: { color: '#4A9EFF', width: 2, shape: 'spline' },
+        hovertemplate: 'týden %{x}: %{y:.1f}°C<extra>' + raw.year + '</extra>',
+    }];
+
+    const layout = {
+        paper_bgcolor: 'transparent',
+        plot_bgcolor:  'transparent',
+        font: { color: '#8A97AD', family: 'Inter, sans-serif', size: 10 },
+        margin: { t: 6, r: 10, b: 34, l: 36 },
+        xaxis: {
+            title: { text: 'týden v roce', font: { size: 10 } },
+            gridcolor: 'rgba(36,48,68,0.6)',
+            tickcolor: 'transparent',
+            tickfont: { size: 10, color: '#8A97AD' },
+            showline: false,
+            range: [1, 53],
+        },
+        yaxis: {
+            gridcolor: 'rgba(36,48,68,0.5)',
+            tickcolor: 'transparent',
+            tickfont: { size: 10, color: '#8A97AD' },
+            showline: false,
+            ticksuffix: '°',
+            zeroline: false,
+        },
+        legend: {
+            font: { size: 10, color: '#8A97AD' },
+            bgcolor: 'transparent',
+            orientation: 'h', x: 0, y: 1.12,
+        },
+        hovermode: 'x unified',
+        hoverlabel: {
+            bgcolor: '#131C2E',
+            bordercolor: '#243044',
+            font: { color: '#E8EDF5', size: 12 },
+        },
+    };
+
+    Plotly.newPlot('hist-chart', traces, layout, { displayModeBar: false, responsive: true });
+}());
+</script>
+{% endif %}
+{% endblock %}
