@@ -1,7 +1,7 @@
 from collections import defaultdict
 from datetime import date, timedelta
 
-from django.db.models import Avg, F, Func, IntegerField
+from django.db.models import Avg, Count, ExpressionWrapper, F, FloatField, Func, IntegerField, Sum
 from django.db.models.functions import ExtractIsoYear, ExtractWeek, ExtractYear
 
 from django.contrib.auth import get_user_model
@@ -469,12 +469,19 @@ class _ExtractDoy(Func):
     output_field = IntegerField()
 
 
-def _historical_series(country=None, point_id=None, granularity="w"):
+def _historical_series(country=None, point_id=None, granularity="w", metric="t"):
     """
-    Temperature series aggregated in SQL, grouped by (year, x) where x is
-    ISO week-of-year (weekly) or day-of-year (daily). Temp = Avg of the
-    daily midpoint (temp_min + temp_max) / 2 — for national aggregates this
-    also averages across all points of the country in the same GROUP BY.
+    Series aggregated in SQL, grouped by (year, x) where x is ISO
+    week-of-year (weekly) or day-of-year (daily).
+
+    Aggregation differs per metric — temperature is a state (average it),
+    precipitation accumulates (sum it):
+      - temp: Avg of the daily midpoint (temp_min + temp_max) / 2. For a
+        national aggregate the same Avg also averages across points.
+      - precip weekly: per-point weekly total = Sum. For a national
+        aggregate, plain Sum would add all 14 points' rain together, so
+        divide by the number of points: Sum / Count(DISTINCT point).
+      - precip daily: Avg across points (a single point is just its value).
     """
     qs = HistoricalActual.objects.all()
     if point_id is not None:
@@ -489,9 +496,20 @@ def _historical_series(country=None, point_id=None, granularity="w"):
         # ISO week pairs with the ISO year (Dec 29–31 can belong to week 1 of the next year)
         qs = qs.annotate(year=ExtractIsoYear("date"), x=ExtractWeek("date"))
 
+    if metric == "p":
+        if granularity == "d":
+            value = Avg("precip_mm")
+        else:
+            value = ExpressionWrapper(
+                Sum("precip_mm") * 1.0 / Count("point", distinct=True),
+                output_field=FloatField(),
+            )
+    else:
+        value = Avg((F("temp_min") + F("temp_max")) / 2.0)
+
     return list(
         qs.values("year", "x")
-        .annotate(temp=Avg((F("temp_min") + F("temp_max")) / 2.0))
+        .annotate(value=value)
         .order_by("year", "x")
     )
 
@@ -504,6 +522,9 @@ def historie(request):
     gran = request.GET.get("g", "w")
     if gran not in ("w", "d"):
         gran = "w"
+    metric = request.GET.get("m", "t")
+    if metric not in ("t", "p"):
+        metric = "t"
 
     country = None
     point_id = None
@@ -518,21 +539,22 @@ def historie(request):
         else:
             point_id, selection_label = point.pk, f"{point.name} ({point.country})"
 
-    rows = _historical_series(country=country, point_id=point_id, granularity=gran)
+    rows = _historical_series(country=country, point_id=point_id, granularity=gran, metric=metric)
 
-    # One trace per year: {year, x: [...], temps: [...]}
+    # One trace per year: {year, x: [...], values: [...]}
     by_year = {}
     for r in rows:
-        if r["temp"] is None:
+        if r["value"] is None:
             continue
-        by_year.setdefault(r["year"], {"x": [], "temps": []})
+        by_year.setdefault(r["year"], {"x": [], "values": []})
         by_year[r["year"]]["x"].append(int(r["x"]))
-        by_year[r["year"]]["temps"].append(round(r["temp"], 1))
+        by_year[r["year"]]["values"].append(round(r["value"], 1))
 
     chart = {
         "granularity": gran,
+        "metric": metric,
         "years": [
-            {"year": y, "x": s["x"], "temps": s["temps"]}
+            {"year": y, "x": s["x"], "values": s["values"]}
             for y, s in sorted(by_year.items())
         ],
     }
@@ -543,5 +565,6 @@ def historie(request):
         "points": points,
         "sel": sel,
         "gran": gran,
+        "metric": metric,
         "selection_label": selection_label,
     })

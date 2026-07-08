@@ -11,10 +11,12 @@
 
 <div class="eyebrow">Historie</div>
 <p class="page-sub">
-    {% if gran == "d" %}Denní{% else %}Týdenní{% endif %} průměrné teploty z historických dat ERA5 · {{ selection_label }}
+    {% if gran == "d" %}Denní{% else %}Týdenní{% endif %}
+    {% if metric == "p" %}úhrn srážek{% else %}průměrné teploty{% endif %}
+    z historických dat ERA5 · {{ selection_label }}
 </p>
 
-{# ── Controls: point selector + granularity toggle ── #}
+{# ── Controls: point selector + metric + granularity ── #}
 <form method="get" id="hist-form" style="margin-bottom:0; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
     <select name="bod" class="point-select" onchange="histSubmit(this.form)">
         <option value="cz" {% if sel == "cz" %}selected{% endif %}>ČR — národní průměr</option>
@@ -25,6 +27,10 @@
             </option>
         {% endfor %}
     </select>
+    <select name="m" class="point-select" onchange="histSubmit(this.form)">
+        <option value="t" {% if metric == "t" %}selected{% endif %}>Teplota</option>
+        <option value="p" {% if metric == "p" %}selected{% endif %}>Srážky</option>
+    </select>
     <select name="g" class="point-select" onchange="histSubmit(this.form)">
         <option value="w" {% if gran == "w" %}selected{% endif %}>Týdenní</option>
         <option value="d" {% if gran == "d" %}selected{% endif %}>Denní</option>
@@ -32,7 +38,10 @@
 </form>
 
 <div class="card">
-    <div class="card-title">Roky v překryvu · {% if gran == "d" %}den v roce{% else %}týden v roce{% endif %} · kliknutím na legendu skryjete rok</div>
+    <div class="card-title">
+        Roky v překryvu · {% if gran == "d" %}den v roce{% else %}týden v roce{% endif %}
+        · aktuální rok zvýrazněn · kliknutím na legendu zapnete/vypnete rok
+    </div>
     {% if has_data %}
         <div id="hist-loading" style="display:none; color:var(--muted); font-size:12px; padding:24px 0; text-align:center;">Načítám…</div>
         <div id="hist-chart" style="width:100%; height:420px;"></div>
@@ -65,28 +74,30 @@ function histSubmit(form) {
     const raw = JSON.parse(document.getElementById('hist-chart-data').textContent);
     if (!raw.years || !raw.years.length) return;
 
-    // Dark-theme-friendly palette; oldest years muted blues, recent years hot.
-    // The most recent year is drawn last (on top) and thicker.
-    const palette = [
-        '#3D5A80', '#4A6FA5', '#5B8BD4', '#4A9EFF', '#2DD4BF',
-        '#6EE7B7', '#FDE047', '#FBBF24', '#FB923C', '#F87171',
-        '#F472B6', '#E8EDF5',
-    ];
     const daily = raw.granularity === 'd';
-    const last = raw.years.length - 1;
+    const precip = raw.metric === 'p';
+    const currentYear = Math.max(...raw.years.map(y => y.year));
+    const unit = precip ? ' mm' : '°C';
 
-    const traces = raw.years.map((yr, i) => ({
-        x: yr.x,
-        y: yr.temps,
-        type: 'scatter', mode: 'lines', name: String(yr.year),
-        line: {
-            color: palette[i % palette.length],
-            width: i === last ? 2.5 : 1.2,
-            shape: daily ? 'linear' : 'spline',
-        },
-        opacity: i === last ? 1 : 0.75,
-        hovertemplate: '%{y:.1f}°C<extra>' + yr.year + '</extra>',
-    }));
+    // Locked palette: current year bold accent blue, prior years muted grey.
+    // Default view = current year + previous 5; older years start hidden
+    // (legendonly) and can be toggled back on via the legend.
+    const traces = raw.years.map(yr => {
+        const isCurrent = yr.year === currentYear;
+        return {
+            x: yr.x,
+            y: yr.values,
+            type: 'scatter', mode: 'lines', name: String(yr.year),
+            line: {
+                color: isCurrent ? '#4A9EFF' : '#8A97AD',
+                width: isCurrent ? 2.5 : 1.2,
+                shape: daily ? 'linear' : 'spline',
+            },
+            opacity: isCurrent ? 1 : 0.35,
+            visible: (currentYear - yr.year <= 5) ? true : 'legendonly',
+            hovertemplate: '%{y:.1f}' + unit + '<extra>' + yr.year + '</extra>',
+        };
+    });
 
     const layout = {
         paper_bgcolor: 'transparent',
@@ -106,7 +117,7 @@ function histSubmit(form) {
             tickcolor: 'transparent',
             tickfont: { size: 10, color: '#8A97AD' },
             showline: false,
-            ticksuffix: '°',
+            ticksuffix: precip ? ' mm' : '°',
             zeroline: false,
         },
         legend: {
