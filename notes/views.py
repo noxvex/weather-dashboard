@@ -1,4 +1,3 @@
-import json
 from collections import defaultdict
 from datetime import date, timedelta
 
@@ -213,7 +212,10 @@ def aktuality(request):
     forecast_date, cz_avg, sk_avg, cz_points, sk_points = _get_weather_panel()
     since_login = _get_since_login(request.user.last_login)
     filter_chips = _build_filter_chips(notes_qs)
-    chart_json = json.dumps(_get_chart_data())
+    # Pass the raw dict — the json_script template filter handles serialization.
+    # Pre-dumping here double-encodes: JSON.parse in the browser then yields a
+    # string instead of an object and the chart silently renders nothing.
+    chart_json = _get_chart_data()
     has_historical = HistoricalActual.objects.exists()
 
     return render(request, "notes/aktuality.html", {
@@ -383,7 +385,7 @@ def point_detail(request):
     )
 
     forecast_rows = []
-    chart_json = json.dumps({"dates": [], "temps_max": [], "temps_min": []})
+    chart_json = {"dates": [], "temps_max": [], "temps_min": []}
     revision_deltas = []
     today_row = None
 
@@ -402,11 +404,11 @@ def point_detail(request):
         forecast_rows = future_rows[:7]
 
         # Full 16-day chart series
-        chart_json = json.dumps({
+        chart_json = {
             "dates": [r.forecast_date.isoformat() for r in all_rows],
             "temps_max": [r.temperature_max for r in all_rows],
             "temps_min": [r.temperature_min for r in all_rows],
-        })
+        }
 
         # Per-point revision deltas: compare last two issued batches
         batch_dates = list(
