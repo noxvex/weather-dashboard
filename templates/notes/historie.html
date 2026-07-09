@@ -52,7 +52,19 @@
     {% endif %}
 </form>
 
-{% if has_data and rozsah == "plna" %}
+{# ── Manual comparison: pick a date range and how many years back ── #}
+<form method="get" class="compare-box {% if rozsah == 'vlastni' %}on{% endif %}" style="margin-top:12px;">
+    <input type="hidden" name="bod" value="{{ sel }}">
+    <input type="hidden" name="m" value="{{ metric }}">
+    <input type="hidden" name="rozsah" value="vlastni">
+    <strong style="color:var(--text);">Vlastní srovnání:</strong>
+    od <input type="text" name="od" placeholder="12.7" value="{{ od }}">
+    do <input type="text" name="do" placeholder="15.11" value="{{ do }}">
+    · počet let <input type="number" name="roky" min="2" max="12" value="{{ roky }}">
+    <button type="submit" class="mode-btn">Porovnat</button>
+</form>
+
+{% if has_data and rozsah == "plna" or has_data and rozsah == "vlastni" %}
 {# View toggles — client-side restyle + server-side value mode #}
 <div class="hist-mode" style="display:flex; gap:6px; margin:12px 0 0; flex-wrap:wrap;">
     <button type="button" class="mode-btn active" data-mode="a" onclick="setHistMode('a')">Zvýraznit aktuální rok</button>
@@ -67,7 +79,9 @@
 
 <div class="card">
     <div class="card-title">
-        {% if rozsah == "plna" %}
+        {% if rozsah == "vlastni" %}
+            Vlastní srovnání · {{ od }} – {{ do }} · posledních {{ roky }} let · podobnost s aktuálním rokem v legendě
+        {% elif rozsah == "plna" %}
             Roky v překryvu · {% if gran == "d" %}den v roce{% else %}týden v roce{% endif %}
             {% if rezim == "pct" %} · odchylka od průměru v %, podobnost s aktuálním rokem v legendě{% endif %}
             · kliknutím na legendu zapnete/vypnete rok
@@ -78,7 +92,7 @@
     </div>
     {% if has_data %}
         <div id="hist-loading" style="display:none; color:var(--muted); font-size:13px; padding:24px 0; text-align:center;">Načítám…</div>
-        <div id="hist-chart" style="width:100%; height:420px;"></div>
+        <div id="hist-chart" style="width:100%; height:560px;"></div>
     {% else %}
         <div class="coming-soon">
             <span class="cs-icon">📊</span>
@@ -171,7 +185,7 @@ function histSubmit(form) {
             type: 'scatter', mode: 'lines', name: yr.name,
             line: { color: s.color, width: s.width, shape: daily ? 'linear' : 'spline' },
             opacity: s.opacity,
-            visible: (currentYear - yr.year <= 5) ? true : 'legendonly',
+            visible: raw.all_visible ? true : ((currentYear - yr.year <= 5) ? true : 'legendonly'),
             hovertemplate: '%{y:.1f}' + unit + '<extra>' + yr.name + '</extra>',
         };
     });
@@ -181,7 +195,7 @@ function histSubmit(form) {
             title: { text: daily ? 'den v roce' : 'týden v roce', font: { size: 11 } },
             gridcolor: 'rgba(36,48,68,0.6)', tickcolor: 'transparent',
             tickfont: { size: 11, color: '#8A97AD' }, showline: false,
-            range: daily ? [1, 366] : [1, 53],
+            range: raw.xrange ? raw.xrange : (daily ? [1, 366] : [1, 53]),
         },
     });
 

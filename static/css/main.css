@@ -159,7 +159,7 @@ a:hover { text-decoration: underline; }
 }
 
 .page-header h1 {
-    font-size: 1.35rem;
+    font-size: 1.7rem;
     font-weight: 700;
     color: var(--text);
 }
@@ -167,7 +167,7 @@ a:hover { text-decoration: underline; }
 .page-header p {
     color: var(--muted);
     margin-top: 0.2rem;
-    font-size: 0.85rem;
+    font-size: 0.95rem;
 }
 
 /* ── HERO card ────────────────────────────────────────── */
@@ -299,7 +299,7 @@ a:hover { text-decoration: underline; }
 /* ── Chart ────────────────────────────────────────────── */
 .chart-wrap { position: relative; }
 #point-chart { height: 160px; }
-#main-chart { height: 340px; }  /* bigger "instrument panel" graph on main page */
+#main-chart { height: 420px; }  /* bigger "instrument panel" graph on main page */
 
 /* ── Graph revize (surfaced under the main-page chart) ─── */
 .graph-revize {
@@ -429,6 +429,11 @@ a:hover { text-decoration: underline; }
     background: linear-gradient(90deg, rgba(248,113,113,.07), rgba(19,28,46,.55) 40%);
 }
 
+.note-card.note--admin {
+    border-left-color: #A78BFA;
+    background: linear-gradient(90deg, rgba(167,139,250,.07), rgba(19,28,46,.55) 40%);
+}
+
 .note-meta {
     display: flex;
     align-items: center;
@@ -439,6 +444,7 @@ a:hover { text-decoration: underline; }
 
 .note-author { font-size: 13px; font-weight: 700; color: var(--text); }
 .note-author.is-leader { color: var(--red); }
+.note-author.is-admin   { color: #A78BFA; }
 .note-author.is-system  { color: var(--teal); }
 .note-dot { color: var(--border); font-size: 10px; }
 .note-time { font-size: 12px; color: var(--muted); }
@@ -459,7 +465,7 @@ a:hover { text-decoration: underline; }
 /* Country chips on notes: CZ / SR / both */
 .badge-country { background: rgba(138,151,173,.16); color: var(--muted); border: 1px solid rgba(138,151,173,.3); }
 .badge-country.cz { background: rgba(74,158,255,.18); color: var(--accent); border: 1px solid rgba(74,158,255,.4); }
-.badge-country.sk { background: rgba(251,113,133,.16); color: #FB7185; border: 1px solid rgba(251,113,133,.4); }
+.badge-country.sk { background: rgba(45,212,191,.16); color: var(--teal); border: 1px solid rgba(45,212,191,.4); }
 
 .note-body { font-size: 14px; line-height: 1.7; color: var(--text); white-space: pre-wrap; }
 
@@ -626,11 +632,10 @@ a:hover { text-decoration: underline; }
 /* ── Main dashboard two-column layout ────────────────── */
 .ak-grid {
     display: grid;
-    /* Feed capped at 620px so notes don't sprawl across the page */
-    grid-template-columns: minmax(0, 620px) 360px;
+    /* Left column: Přehled graph + Aktuality feed. Right: weather sidebar. */
+    grid-template-columns: minmax(0, 1fr) 360px;
     gap: var(--grid-gap);
     align-items: start;
-    justify-content: center;
 }
 
 @media (max-width: 860px) {
@@ -786,14 +791,14 @@ a:hover { text-decoration: underline; }
 }
 
 /* ── Revision tracker table ───────────────────────────── */
-.rev-meta { font-size: 11px; color: var(--muted); margin-bottom: 14px; }
+.rev-meta { font-size: 13.5px; color: var(--muted); margin-bottom: 14px; }
 .rev-meta strong { color: var(--text); }
 
 .rev-table { width: 100%; border-collapse: collapse; }
 
 .rev-table th {
     text-align: left;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -803,8 +808,8 @@ a:hover { text-decoration: underline; }
 }
 
 .rev-table td {
-    padding: 9px 12px;
-    font-size: 13px;
+    padding: 12px 14px;
+    font-size: 14.5px;
     border-bottom: 1px solid rgba(36,48,68,.5);
     color: var(--text);
 }
@@ -1041,9 +1046,9 @@ hr { border: none; border-top: 1px solid var(--border); margin: 1.25rem 0; }
     border: 1px solid rgba(74,158,255,.3);
 }
 .pt-bar.pt-sk {
-    background: linear-gradient(90deg, rgba(251,113,133,.18), rgba(251,113,133,.05));
-    color: #FB7185;
-    border: 1px solid rgba(251,113,133,.3);
+    background: linear-gradient(90deg, rgba(45,212,191,.18), rgba(45,212,191,.05));
+    color: var(--teal);
+    border: 1px solid rgba(45,212,191,.3);
 }
 
 /* ── Feed scroll + pagination ──────────────────────────── */
@@ -1091,3 +1096,80 @@ hr { border: none; border-top: 1px solid var(--border); margin: 1.25rem 0; }
 
 .report-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 5px; }
 .report-body { font-size: 13.5px; line-height: 1.6; color: var(--text); }
+
+
+/* ── Bod two-column layout ─────────────────────────────── */
+.bod-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--grid-gap);
+    align-items: start;
+}
+
+@media (max-width: 900px) {
+    .bod-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Custom horizon picker (Přehled graph side control) ── */
+.custom-box {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(10,14,26,.6);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px 14px;
+    font-size: 13px;
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.custom-box input[type=number] {
+    width: 58px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 14px;
+    padding: 5px 8px;
+    text-align: center;
+}
+
+.custom-box.on {
+    border-color: rgba(167,139,250,.5);
+    box-shadow: 0 0 14px rgba(167,139,250,.25);
+    color: #A78BFA;
+}
+
+/* ── Historie manual comparison form ───────────────────── */
+.compare-box {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    background: rgba(10,14,26,.6);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 14px;
+}
+
+.compare-box input {
+    width: 76px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 14px;
+    padding: 6px 8px;
+    text-align: center;
+}
+
+.compare-box input[type=number] { width: 58px; }
+
+.compare-box.on {
+    border-color: rgba(167,139,250,.5);
+    box-shadow: 0 0 14px rgba(167,139,250,.22);
+}

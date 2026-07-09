@@ -46,6 +46,10 @@
     </div>
 </div>
 
+{# ── Two halves: forecast + reports left, chart + revisions right ── #}
+<div class="bod-grid">
+<div>
+
 {# ── 7-day forecast table ── #}
 {% if forecast_rows %}
 <div class="card">
@@ -76,21 +80,6 @@
 </div>
 {% endif %}
 
-{# ── Temperature chart with horizon switcher ── #}
-<div class="card">
-    <div class="card-title">Vývoj teploty <span class="hint">{{ selected.name }}</span></div>
-    <div class="seg">
-        <button class="seg-short on" data-mode="short">Krátkodobá<small>1–16 dní</small></button>
-        <button class="seg-mid{% if not has_mid %} soon" title="Data se sbírají{% endif %}" data-mode="mid">
-            Střednědobá<small>1–4 měsíce · SEAS5</small>
-        </button>
-        <button class="seg-long{% if not has_long %} soon" title="Data se sbírají{% endif %}" data-mode="long">
-            Dlouhodobá<small>4–7 měsíců · SEAS5</small>
-        </button>
-    </div>
-    <div id="point-chart"></div>
-</div>
-
 {# ── System reports for this point's country ── #}
 <div class="card">
     <div class="card-title">Co očekávat <span class="hint">systémové reporty · mizí po 14 dnech, pokud nejsou připnuté</span></div>
@@ -117,6 +106,24 @@
     {% endif %}
 </div>
 
+</div>
+<div>
+
+{# ── Temperature chart with horizon switcher ── #}
+<div class="card">
+    <div class="card-title">Vývoj teploty <span class="hint">{{ selected.name }}</span></div>
+    <div class="seg">
+        <button class="seg-short on" data-mode="short">Krátkodobá<small>1–16 dní</small></button>
+        <button class="seg-mid{% if not has_mid %} soon" title="Data se sbírají{% endif %}" data-mode="mid">
+            Střednědobá<small>1–4 měsíce · SEAS5</small>
+        </button>
+        <button class="seg-long{% if not has_long %} soon" title="Data se sbírají{% endif %}" data-mode="long">
+            Dlouhodobá<small>4–7 měsíců · SEAS5</small>
+        </button>
+    </div>
+    <div id="point-chart"></div>
+</div>
+
 {# ── Per-point revision deltas ── #}
 <div class="card">
     <div class="card-title">Revize předpovědi <span class="hint">tento bod · poslední dva snímky</span></div>
@@ -140,6 +147,9 @@
             Revize budou dostupné po alespoň dvou denních snímcích předpovědi.
         </div>
     {% endif %}
+</div>
+
+</div>
 </div>
 
 {% endif %}{# end if points #}

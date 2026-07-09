@@ -9,19 +9,34 @@
 
 {% block content %}
 
+{# ══════════ Two columns: Přehled + feed left, weather right ══════════ #}
+<div class="ak-grid">
+
+    {# ════ LEFT — Přehled graph, Aktuality feed under it ════ #}
+    <div>
+
 <div class="eyebrow">Přehled</div>
 
 {# ══════════ Forecast graph (instrument panel) ══════════ #}
 <div class="card chart-card">
     <div class="card-title">Vývoj teploty <span class="hint">ČR + SK národní průměr</span></div>
-    <div class="seg">
-        <button class="seg-short on" data-mode="short">Krátkodobá<small>1–16 dní</small></button>
-        <button class="seg-mid{% if not has_mid %} soon" title="Data se sbírají{% endif %}" data-mode="mid">
-            Střednědobá<small>1–4 měsíce · SEAS5</small>
-        </button>
-        <button class="seg-long{% if not has_long %} soon" title="Data se sbírají{% endif %}" data-mode="long">
-            Dlouhodobá<small>4–7 měsíců · SEAS5</small>
-        </button>
+    <div style="display:flex; gap:10px; align-items:stretch; margin-bottom:14px; flex-wrap:wrap;">
+        <div class="seg" style="flex:1; margin-bottom:0; min-width:320px;">
+            <button class="seg-short on" data-mode="short">Krátkodobá<small>1–16 dní</small></button>
+            <button class="seg-mid{% if not has_mid %} soon" title="Data se sbírají{% endif %}" data-mode="mid">
+                Střednědobá<small>1–4 měsíce · SEAS5</small>
+            </button>
+            <button class="seg-long{% if not has_long %} soon" title="Data se sbírají{% endif %}" data-mode="long">
+                Dlouhodobá<small>4–7 měsíců · SEAS5</small>
+            </button>
+        </div>
+        {# Custom horizon — pick your own number of months #}
+        <div class="custom-box" id="custom-box">
+            Vlastní:
+            <input type="number" id="cust-months" min="1" max="7" value="2">
+            měs.
+            <button type="button" class="mode-btn" id="cust-apply">Zobrazit</button>
+        </div>
     </div>
     <div class="chart-wrap">
         <div id="main-chart"></div>
@@ -66,12 +81,7 @@
     </div>
 </div>
 
-{# ══════════ Two-column: notes feed + weather sidebar ══════════ #}
-<div class="ak-grid">
-
-    {# ════ LEFT — notes feed (unchanged) ════ #}
-    <div>
-        <div class="eyebrow">Aktuality</div>
+        <div class="eyebrow" style="margin-top:10px;">Aktuality</div>
 
         {% if since_login %}
         <p class="page-sub">
@@ -109,6 +119,7 @@
         {% for note in notes %}
             <div class="note-card
                 {% if note.is_system %}note--h-{{ note.horizon }}
+                {% elif note.author.role == 'admin' %}note--admin
                 {% elif note.author.role == 'leader' %}note--leader{% endif %}">
 
                 <div class="note-meta">
@@ -120,6 +131,8 @@
                         {% elif note.note_type == "system_outlook" %}
                             <span class="note-badge badge-outlook">výhled</span>
                         {% endif %}
+                    {% elif note.author.role == "admin" %}
+                        <span class="note-author is-admin">{{ note.author.username }}</span>
                     {% elif note.author.role == "leader" %}
                         <span class="note-author is-leader">{{ note.author.username }}</span>
                     {% else %}
@@ -381,8 +394,32 @@
             if (this.classList.contains('soon')) return;  // no data yet
             document.querySelectorAll('.seg button').forEach(b => b.classList.remove('on'));
             this.classList.add('on');
+            document.getElementById('custom-box').classList.remove('on');
             draw(datasets[this.dataset.mode]);
         });
+    });
+
+    // Custom horizon: short-range for the near days + seasonal beyond,
+    // cut at today + N months (30 days per month)
+    function customData(months) {
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() + months * 30);
+        const cut = cutoff.toISOString().slice(0, 10);
+        const merge = (c) => {
+            const shortD = datasets.short[c] || [];
+            const lastShort = shortD.length ? shortD[shortD.length - 1].date : '';
+            const seasonal = (datasets.mid[c] || []).concat(datasets.long[c] || []);
+            return shortD.concat(seasonal.filter(d => d.date > lastShort))
+                         .filter(d => d.date <= cut);
+        };
+        return { cz: merge('cz'), sk: merge('sk') };
+    }
+
+    document.getElementById('cust-apply').addEventListener('click', function () {
+        const m = Math.max(1, Math.min(7, +document.getElementById('cust-months').value || 2));
+        document.querySelectorAll('.seg button').forEach(b => b.classList.remove('on'));
+        document.getElementById('custom-box').classList.add('on');
+        draw(customData(m));
     });
 }());
 </script>

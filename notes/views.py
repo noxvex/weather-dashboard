@@ -698,11 +698,33 @@ def historie(request):
     if metric not in ("t", "p"):
         metric = "t"
     rozsah = request.GET.get("rozsah", "plna")
-    if rozsah not in ("kratka", "stredni", "dlouha", "plna"):
+    if rozsah not in ("kratka", "stredni", "dlouha", "plna", "vlastni"):
         rozsah = "plna"
     rezim = request.GET.get("rezim", "abs")
     if rezim not in ("abs", "pct"):
         rezim = "abs"
+
+    # Manual comparison: date range typed as "D.M" (e.g. 12.7 till 15.11)
+    # plus how many recent years to compare
+    def _parse_dm(s):
+        try:
+            d, m = s.strip().rstrip(".").split(".")[:2]
+            return date(2001, int(m), int(d)).timetuple().tm_yday  # non-leap day-of-year
+        except (ValueError, AttributeError):
+            return None
+
+    od_raw = request.GET.get("od", "")
+    do_raw = request.GET.get("do", "")
+    try:
+        roky = max(2, min(12, int(request.GET.get("roky", "5"))))
+    except ValueError:
+        roky = 5
+    doy_from = _parse_dm(od_raw)
+    doy_to = _parse_dm(do_raw)
+    if rozsah == "vlastni" and (doy_from is None or doy_to is None):
+        rozsah = "plna"  # incomplete input — fall back to full history
+    if doy_from is not None and doy_to is not None and doy_from > doy_to:
+        doy_from, doy_to = doy_to, doy_from
 
     country = None
     point_id = None
@@ -717,7 +739,7 @@ def historie(request):
         else:
             point_id, selection_label = point.pk, f"{point.name} ({point.country})"
 
-    if rozsah != "plna":
+    if rozsah in ("kratka", "stredni", "dlouha"):
         # Recent-actuals span: simple date series, no overlay
         span = _historical_span(
             country=country, point_id=point_id,
@@ -726,17 +748,27 @@ def historie(request):
         chart = {"mode": "span", "rozsah": rozsah, "metric": metric, **span}
         has_data = bool(span["dates"])
     else:
+        # Overlay: full history, or manual comparison (daily, custom doy range,
+        # last `roky` years, all traces visible)
+        if rozsah == "vlastni":
+            gran = "d"
+            rezim = "abs"
         rows = _historical_series(country=country, point_id=point_id, granularity=gran, metric=metric)
 
         by_year = {}
         for r in rows:
             if r["value"] is None:
                 continue
+            x = int(r["x"])
+            if rozsah == "vlastni" and not (doy_from <= x <= doy_to):
+                continue
             by_year.setdefault(r["year"], {"x": [], "values": []})
-            by_year[r["year"]]["x"].append(int(r["x"]))
+            by_year[r["year"]]["x"].append(x)
             by_year[r["year"]]["values"].append(round(r["value"], 1))
 
         current_year = max(by_year) if by_year else None
+        if rozsah == "vlastni" and current_year is not None:
+            by_year = {y: s for y, s in by_year.items() if y > current_year - roky}
 
         # Similarity % of each year vs the current year over overlapping x:
         # 100 % = identical, each °C (or mm) of mean abs difference costs 12.5 pts.
@@ -778,6 +810,9 @@ def historie(request):
                 for y, s in sorted(by_year.items())
             ],
         }
+        if rozsah == "vlastni":
+            chart["all_visible"] = True
+            chart["xrange"] = [doy_from, doy_to]
         has_data = bool(by_year)
 
     return render(request, "notes/historie.html", {
@@ -789,5 +824,8 @@ def historie(request):
         "metric": metric,
         "rozsah": rozsah,
         "rezim": rezim,
+        "od": od_raw,
+        "do": do_raw,
+        "roky": roky,
         "selection_label": selection_label,
     })
