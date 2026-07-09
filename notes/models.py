@@ -48,9 +48,8 @@ class Note(models.Model):
         ordering = ["-is_pinned", "-created_at"]
 
     def save(self, *args, **kwargs):
-        # System notes are always pinned — no manual step needed
-        if self.note_type.startswith("system_"):
-            self.is_pinned = True
+        # System notes start unpinned and auto-expire after 14 days
+        # (purged by detect_changes) unless a leader/admin pins them.
         super().save(*args, **kwargs)
 
     def __str__(self):

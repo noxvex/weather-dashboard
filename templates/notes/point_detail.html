@@ -76,10 +76,45 @@
 </div>
 {% endif %}
 
-{# ── 16-day temperature chart ── #}
+{# ── Temperature chart with horizon switcher ── #}
 <div class="card">
-    <div class="card-title">Vývoj teploty <span class="hint">16denní okno</span></div>
+    <div class="card-title">Vývoj teploty <span class="hint">{{ selected.name }}</span></div>
+    <div class="seg">
+        <button class="seg-short on" data-mode="short">Krátkodobá<small>1–16 dní</small></button>
+        <button class="seg-mid{% if not has_mid %} soon" title="Data se sbírají{% endif %}" data-mode="mid">
+            Střednědobá<small>1–4 měsíce · SEAS5</small>
+        </button>
+        <button class="seg-long{% if not has_long %} soon" title="Data se sbírají{% endif %}" data-mode="long">
+            Dlouhodobá<small>4–7 měsíců · SEAS5</small>
+        </button>
+    </div>
     <div id="point-chart"></div>
+</div>
+
+{# ── System reports for this point's country ── #}
+<div class="card">
+    <div class="card-title">Co očekávat <span class="hint">systémové reporty · mizí po 14 dnech, pokud nejsou připnuté</span></div>
+    {% if reports %}
+        {% for r in reports %}
+        <div class="report-row note--h-{{ r.horizon }}">
+            <div class="report-meta">
+                {% if r.note_type == "system_change" %}
+                    <span class="note-badge badge-change">změna</span>
+                {% else %}
+                    <span class="note-badge badge-outlook">výhled</span>
+                {% endif %}
+                {% if r.country == "cz" %}<span class="note-badge badge-country cz">CZ</span>
+                {% elif r.country == "sk" %}<span class="note-badge badge-country sk">SK</span>
+                {% else %}<span class="note-badge badge-country">CZ + SK</span>{% endif %}
+                <span class="note-time">{{ r.created_at|date:"j. n. Y" }}</span>
+                {% if r.is_pinned %}<span class="note-badge badge-pinned">📌 připnuto</span>{% endif %}
+            </div>
+            <div class="report-body">{{ r.body }}</div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="no-data" style="padding:1rem 0;">Žádné aktuální systémové reporty pro {{ selected.country }}.</div>
+    {% endif %}
 </div>
 
 {# ── Per-point revision deltas ── #}
@@ -113,28 +148,47 @@
 
 {% block extra_js %}
 {{ chart_json|json_script:"point-chart-data" }}
+{{ mid_chart|json_script:"point-mid-data" }}
+{{ long_chart|json_script:"point-long-data" }}
 <script>
 (function () {
-    const raw = JSON.parse(document.getElementById('point-chart-data').textContent);
-    if (!raw.dates || !raw.dates.length) return;
+    const datasets = {
+        short: JSON.parse(document.getElementById('point-chart-data').textContent),
+        mid:   JSON.parse(document.getElementById('point-mid-data').textContent),
+        long:  JSON.parse(document.getElementById('point-long-data').textContent),
+    };
+    const modeColors = { short: '#4A9EFF', mid: '#FBBF24', long: '#34D399' };
+    if (!datasets.short.dates || !datasets.short.dates.length) return;
 
-    const traces = [
-        {
-            x: raw.dates,
-            y: raw.temps_max,
-            type: 'scatter', mode: 'lines', name: 'Max',
-            line: { color: '#4A9EFF', width: 2.5, shape: 'spline' },
-            fill: 'tozeroy', fillcolor: 'rgba(74,158,255,0.10)',
-            hovertemplate: '%{y:.1f}°C<extra>Max</extra>',
-        },
-        {
-            x: raw.dates,
-            y: raw.temps_min,
-            type: 'scatter', mode: 'lines', name: 'Min',
-            line: { color: '#2DD4BF', width: 1.5, shape: 'spline', dash: 'dot' },
-            hovertemplate: '%{y:.1f}°C<extra>Min</extra>',
-        },
-    ];
+    function buildTraces(mode) {
+        const d = datasets[mode];
+        if (mode === 'short') {
+            return [
+                {
+                    x: d.dates, y: d.temps_max,
+                    type: 'scatter', mode: 'lines', name: 'Max',
+                    line: { color: '#4A9EFF', width: 2.5, shape: 'spline' },
+                    fill: 'tozeroy', fillcolor: 'rgba(74,158,255,0.10)',
+                    hovertemplate: '%{y:.1f}°C<extra>Max</extra>',
+                },
+                {
+                    x: d.dates, y: d.temps_min,
+                    type: 'scatter', mode: 'lines', name: 'Min',
+                    line: { color: '#2DD4BF', width: 1.5, shape: 'spline', dash: 'dot' },
+                    hovertemplate: '%{y:.1f}°C<extra>Min</extra>',
+                },
+            ];
+        }
+        // Seasonal modes: single ensemble-mean trace in the horizon color
+        return [{
+            x: d.dates, y: d.temps,
+            type: 'scatter', mode: 'lines', name: 'Průměr (SEAS5)',
+            line: { color: modeColors[mode], width: 2, shape: 'spline' },
+            hovertemplate: '%{y:.1f}°C<extra>Průměr</extra>',
+        }];
+    }
+
+    const traces = buildTraces('short');
 
     const layout = {
         paper_bgcolor: 'transparent',
@@ -169,6 +223,17 @@
     };
 
     Plotly.newPlot('point-chart', traces, layout, { displayModeBar: false, responsive: true });
+
+    // Horizon switcher — swaps the actual dataset (short / mid / long)
+    document.querySelectorAll('.seg button[data-mode]').forEach(btn => {
+        btn.addEventListener('click', function () {
+            if (this.classList.contains('soon')) return;
+            document.querySelectorAll('.seg button').forEach(b => b.classList.remove('on'));
+            this.classList.add('on');
+            Plotly.react('point-chart', buildTraces(this.dataset.mode), layout,
+                         { displayModeBar: false, responsive: true });
+        });
+    });
 }());
 </script>
 {% endblock %}

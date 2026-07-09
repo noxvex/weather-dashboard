@@ -11,13 +11,26 @@
 
 <div class="eyebrow">Historie</div>
 <p class="page-sub">
-    {% if gran == "d" %}Denní{% else %}Týdenní{% endif %}
-    {% if metric == "p" %}úhrn srážek{% else %}průměrné teploty{% endif %}
+    {% if metric == "p" %}Srážky{% else %}Teploty{% endif %}
     z historických dat ERA5 · {{ selection_label }}
 </p>
 
-{# ── Controls: point selector + metric + granularity ── #}
+{# ── Range bars: recent spans vs full multi-year history ── #}
+<div class="seg" style="max-width:640px;">
+    <a class="seg-link seg-short {% if rozsah == 'kratka' %}on{% endif %}"
+       href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah=kratka">Krátkodobá<small>16 dní</small></a>
+    <a class="seg-link seg-mid {% if rozsah == 'stredni' %}on{% endif %}"
+       href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah=stredni">Střednědobá<small>4 měsíce</small></a>
+    <a class="seg-link seg-long {% if rozsah == 'dlouha' %}on{% endif %}"
+       href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah=dlouha">Dlouhodobá<small>7 měsíců</small></a>
+    <a class="seg-link seg-full {% if rozsah == 'plna' %}on{% endif %}"
+       href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah=plna">Celá historie<small>od 2015 · překryv let</small></a>
+</div>
+
+{# ── Controls: point + metric + granularity (+ rezim for full history) ── #}
 <form method="get" id="hist-form" style="margin-bottom:0; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+    <input type="hidden" name="rozsah" value="{{ rozsah }}">
+    <input type="hidden" name="rezim" value="{{ rezim }}">
     <select name="bod" class="point-select" onchange="histSubmit(this.form)">
         <option value="cz" {% if sel == "cz" %}selected{% endif %}>ČR — národní průměr</option>
         <option value="sk" {% if sel == "sk" %}selected{% endif %}>SR — národní průměr</option>
@@ -31,41 +44,40 @@
         <option value="t" {% if metric == "t" %}selected{% endif %}>Teplota</option>
         <option value="p" {% if metric == "p" %}selected{% endif %}>Srážky</option>
     </select>
+    {% if rozsah == "plna" %}
     <select name="g" class="point-select" onchange="histSubmit(this.form)">
         <option value="w" {% if gran == "w" %}selected{% endif %}>Týdenní</option>
         <option value="d" {% if gran == "d" %}selected{% endif %}>Denní</option>
     </select>
+    {% endif %}
 </form>
 
-{% if has_data %}
-{# View-mode toggle — pure client-side restyle, never reloads the page #}
-<div class="hist-mode" style="display:flex; gap:6px; margin:12px 0 0;">
+{% if has_data and rozsah == "plna" %}
+{# View toggles — client-side restyle + server-side value mode #}
+<div class="hist-mode" style="display:flex; gap:6px; margin:12px 0 0; flex-wrap:wrap;">
     <button type="button" class="mode-btn active" data-mode="a" onclick="setHistMode('a')">Zvýraznit aktuální rok</button>
     <button type="button" class="mode-btn" data-mode="b" onclick="setHistMode('b')">Barevně odlišit roky</button>
+    <span style="width:14px;"></span>
+    <a class="mode-btn {% if rezim == 'abs' %}active{% endif %}"
+       href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah=plna&rezim=abs">Hodnoty</a>
+    <a class="mode-btn {% if rezim == 'pct' %}active{% endif %}"
+       href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah=plna&rezim=pct">Rozdíl % · podobnost</a>
 </div>
-<style>
-    .mode-btn {
-        background: var(--panel, #131C2E);
-        color: var(--muted);
-        border: 1px solid #243044;
-        border-radius: 6px;
-        padding: 6px 12px;
-        font: 500 12px 'Inter', sans-serif;
-        cursor: pointer;
-        transition: all .15s;
-    }
-    .mode-btn:hover { border-color: rgba(74,158,255,.4); color: #E8EDF5; }
-    .mode-btn.active { background: rgba(74,158,255,.14); border-color: var(--accent); color: var(--accent); }
-</style>
 {% endif %}
 
 <div class="card">
     <div class="card-title">
-        Roky v překryvu · {% if gran == "d" %}den v roce{% else %}týden v roce{% endif %}
-        · kliknutím na legendu zapnete/vypnete rok
+        {% if rozsah == "plna" %}
+            Roky v překryvu · {% if gran == "d" %}den v roce{% else %}týden v roce{% endif %}
+            {% if rezim == "pct" %} · odchylka od průměru v %, podobnost s aktuálním rokem v legendě{% endif %}
+            · kliknutím na legendu zapnete/vypnete rok
+        {% else %}
+            Skutečná data (ERA5) ·
+            {% if rozsah == "kratka" %}posledních 16 dní{% elif rozsah == "stredni" %}poslední 4 měsíce{% else %}posledních 7 měsíců{% endif %}
+        {% endif %}
     </div>
     {% if has_data %}
-        <div id="hist-loading" style="display:none; color:var(--muted); font-size:12px; padding:24px 0; text-align:center;">Načítám…</div>
+        <div id="hist-loading" style="display:none; color:var(--muted); font-size:13px; padding:24px 0; text-align:center;">Načítám…</div>
         <div id="hist-chart" style="width:100%; height:420px;"></div>
     {% else %}
         <div class="coming-soon">
@@ -80,7 +92,6 @@
 
 {% block extra_js %}
 <script>
-// Show loading state while the page reloads with the new selection
 function histSubmit(form) {
     const chart = document.getElementById('hist-chart');
     const loading = document.getElementById('hist-loading');
@@ -94,19 +105,53 @@ function histSubmit(form) {
 <script>
 (function () {
     const raw = JSON.parse(document.getElementById('hist-chart-data').textContent);
-    if (!raw.years || !raw.years.length) return;
-
-    const daily = raw.granularity === 'd';
     const precip = raw.metric === 'p';
-    const currentYear = Math.max(...raw.years.map(y => y.year));
-    const unit = precip ? ' mm' : '°C';
+    const pct = raw.rezim === 'pct';
+    const unit = pct ? ' %' : (precip ? ' mm' : '°C');
 
-    // Mode B palette (distinct color per year, cycled if > 6 years toggled on).
+    const baseLayout = {
+        paper_bgcolor: 'transparent',
+        plot_bgcolor:  'transparent',
+        font: { color: '#8A97AD', family: 'Inter, sans-serif', size: 11 },
+        margin: { t: 6, r: 10, b: 38, l: 42 },
+        yaxis: {
+            gridcolor: 'rgba(36,48,68,0.5)', tickcolor: 'transparent',
+            tickfont: { size: 11, color: '#8A97AD' }, showline: false,
+            ticksuffix: pct ? ' %' : (precip ? ' mm' : '°'), zeroline: pct,
+            zerolinecolor: 'rgba(138,151,173,.35)',
+        },
+        legend: { font: { size: 11, color: '#8A97AD' }, bgcolor: 'transparent', orientation: 'h', x: 0, y: 1.14 },
+        hovermode: 'x unified',
+        hoverlabel: { bgcolor: '#131C2E', bordercolor: '#243044', font: { color: '#E8EDF5', size: 12 } },
+    };
+    const config = { displayModeBar: false, responsive: true };
+
+    if (raw.mode === 'span') {
+        // Recent actuals — simple date series colored by the horizon
+        const spanColors = { kratka: '#4A9EFF', stredni: '#FBBF24', dlouha: '#34D399' };
+        const c = spanColors[raw.rozsah] || '#4A9EFF';
+        const layout = Object.assign({}, baseLayout, {
+            xaxis: {
+                gridcolor: 'rgba(36,48,68,0.6)', tickcolor: 'transparent',
+                tickfont: { size: 11, color: '#8A97AD' }, showline: false, type: 'date',
+            },
+        });
+        Plotly.newPlot('hist-chart', [{
+            x: raw.dates, y: raw.values,
+            type: 'scatter', mode: 'lines', name: 'ERA5',
+            line: { color: c, width: 2.2, shape: 'spline' },
+            fill: 'tozeroy', fillcolor: c + '1A',
+            hovertemplate: '%{y:.1f}' + (precip ? ' mm' : '°C') + '<extra>ERA5</extra>',
+        }], layout, config);
+        return;
+    }
+
+    // ── Full history: multi-year overlay ──
+    if (!raw.years || !raw.years.length) return;
+    const daily = raw.granularity === 'd';
+    const currentYear = Math.max(...raw.years.map(y => y.year));
     const PALETTE_B = ['#4A9EFF', '#2DD4BF', '#FBBF24', '#A78BFA', '#FB7185', '#34D399'];
 
-    // Per-mode line styling for trace i. Returns {color, width, opacity}.
-    //   a = highlight current year (bold blue, others muted grey)
-    //   b = distinct color per year in year order, full opacity, equal weight
     function styleFor(mode, yr, i) {
         if (mode === 'b') {
             return { color: PALETTE_B[i % PALETTE_B.length], width: 2, opacity: 1 };
@@ -119,74 +164,40 @@ function histSubmit(form) {
         };
     }
 
-    // Default view = current year + previous 5; older years start hidden
-    // (legendonly) and can be toggled back on via the legend — in either mode.
     const traces = raw.years.map((yr, i) => {
         const s = styleFor('a', yr, i);
         return {
-            x: yr.x,
-            y: yr.values,
-            type: 'scatter', mode: 'lines', name: String(yr.year),
+            x: yr.x, y: yr.values,
+            type: 'scatter', mode: 'lines', name: yr.name,
             line: { color: s.color, width: s.width, shape: daily ? 'linear' : 'spline' },
             opacity: s.opacity,
             visible: (currentYear - yr.year <= 5) ? true : 'legendonly',
-            hovertemplate: '%{y:.1f}' + unit + '<extra>' + yr.year + '</extra>',
+            hovertemplate: '%{y:.1f}' + unit + '<extra>' + yr.name + '</extra>',
         };
     });
 
-    // Restyle existing traces in place — no refetch, no reload. Only touches
-    // color/width/opacity, so the per-year legend on/off state is preserved.
+    const layout = Object.assign({}, baseLayout, {
+        xaxis: {
+            title: { text: daily ? 'den v roce' : 'týden v roce', font: { size: 11 } },
+            gridcolor: 'rgba(36,48,68,0.6)', tickcolor: 'transparent',
+            tickfont: { size: 11, color: '#8A97AD' }, showline: false,
+            range: daily ? [1, 366] : [1, 53],
+        },
+    });
+
     window.setHistMode = function (mode) {
         const colors = [], widths = [], opacities = [];
         raw.years.forEach((yr, i) => {
             const s = styleFor(mode, yr, i);
             colors.push(s.color); widths.push(s.width); opacities.push(s.opacity);
         });
-        Plotly.restyle('hist-chart', {
-            'line.color': colors,
-            'line.width': widths,
-            'opacity': opacities,
-        });
-        document.querySelectorAll('.mode-btn').forEach(b => {
+        Plotly.restyle('hist-chart', { 'line.color': colors, 'line.width': widths, 'opacity': opacities });
+        document.querySelectorAll('.mode-btn[data-mode]').forEach(b => {
             b.classList.toggle('active', b.dataset.mode === mode);
         });
     };
 
-    const layout = {
-        paper_bgcolor: 'transparent',
-        plot_bgcolor:  'transparent',
-        font: { color: '#8A97AD', family: 'Inter, sans-serif', size: 10 },
-        margin: { t: 6, r: 10, b: 34, l: 36 },
-        xaxis: {
-            title: { text: daily ? 'den v roce' : 'týden v roce', font: { size: 10 } },
-            gridcolor: 'rgba(36,48,68,0.6)',
-            tickcolor: 'transparent',
-            tickfont: { size: 10, color: '#8A97AD' },
-            showline: false,
-            range: daily ? [1, 366] : [1, 53],
-        },
-        yaxis: {
-            gridcolor: 'rgba(36,48,68,0.5)',
-            tickcolor: 'transparent',
-            tickfont: { size: 10, color: '#8A97AD' },
-            showline: false,
-            ticksuffix: precip ? ' mm' : '°',
-            zeroline: false,
-        },
-        legend: {
-            font: { size: 10, color: '#8A97AD' },
-            bgcolor: 'transparent',
-            orientation: 'h', x: 0, y: 1.14,
-        },
-        hovermode: 'x unified',
-        hoverlabel: {
-            bgcolor: '#131C2E',
-            bordercolor: '#243044',
-            font: { color: '#E8EDF5', size: 12 },
-        },
-    };
-
-    Plotly.newPlot('hist-chart', traces, layout, { displayModeBar: false, responsive: true });
+    Plotly.newPlot('hist-chart', traces, layout, config);
 }());
 </script>
 {% endif %}

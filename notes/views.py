@@ -6,6 +6,8 @@ from django.db.models.functions import ExtractIsoYear, ExtractWeek, ExtractYear
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
+from django.core.paginator import Paginator
+from django.db.models import Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 
@@ -309,7 +311,12 @@ def _build_filter_chips(notes_qs):
 def aktuality(request):
     autor = request.GET.get("autor", FILTER_ALL)
     notes_qs = Note.objects.select_related("author").all()
-    notes = list(_apply_filter(notes_qs, autor))
+    filtered = _apply_filter(notes_qs, autor)
+
+    # Paginate the feed (10 per page) so the page never grows unbounded
+    paginator = Paginator(filtered, 10)
+    page_obj = paginator.get_page(request.GET.get("strana"))
+    notes = list(page_obj.object_list)
     for note in notes:
         note.user_can_modify = _can_modify(request.user, note)
 
@@ -345,6 +352,7 @@ def aktuality(request):
         "has_long": has_long,
         "revision_summary": revision_summary,
         "has_historical": has_historical,
+        "page_obj": page_obj,
     })
 
 
@@ -560,12 +568,46 @@ def point_detail(request):
                             "prev": pt,
                         })
 
+    # ── Per-point seasonal series for the horizon switcher ──
+    mid_chart = {"dates": [], "temps": []}
+    long_chart = {"dates": [], "temps": []}
+    latest_seas = (
+        MediumLongRangeForecast.objects
+        .filter(point=selected, horizon=MediumLongRangeForecast.HORIZON_SEAS5)
+        .order_by("-issued_at")
+        .values_list("issued_at", flat=True)
+        .first()
+    )
+    if latest_seas:
+        mid_cutoff = today + timedelta(days=120)
+        for r in MediumLongRangeForecast.objects.filter(
+            point=selected, horizon=MediumLongRangeForecast.HORIZON_SEAS5, issued_at=latest_seas,
+        ).order_by("target_date"):
+            if r.temp_mean is None:
+                continue
+            target = mid_chart if r.target_date <= mid_cutoff else long_chart
+            target["dates"].append(r.target_date.isoformat())
+            target["temps"].append(round(r.temp_mean, 1))
+
+    # ── System reports for this point's country (expire after 14 days unless pinned) ──
+    reports = list(
+        Note.objects
+        .filter(note_type__startswith="system_")
+        .filter(Q(country=selected.country.lower()) | Q(country=Note.COUNTRY_BOTH))
+        .order_by("-is_pinned", "-created_at")[:8]
+    )
+
     return render(request, "notes/point_detail.html", {
         "points": points,
         "selected": selected,
         "today_row": today_row,
         "forecast_rows": forecast_rows,
         "chart_json": chart_json,
+        "mid_chart": mid_chart,
+        "long_chart": long_chart,
+        "has_mid": bool(mid_chart["dates"]),
+        "has_long": bool(long_chart["dates"]),
+        "reports": reports,
         "revision_deltas": revision_deltas,
         "latest_issued": latest_issued,
     })
@@ -586,12 +628,10 @@ def _historical_series(country=None, point_id=None, granularity="w", metric="t")
 
     Aggregation differs per metric — temperature is a state (average it),
     precipitation accumulates (sum it):
-      - temp: Avg of the daily midpoint (temp_min + temp_max) / 2. For a
-        national aggregate the same Avg also averages across points.
-      - precip weekly: per-point weekly total = Sum. For a national
-        aggregate, plain Sum would add all 14 points' rain together, so
-        divide by the number of points: Sum / Count(DISTINCT point).
-      - precip daily: Avg across points (a single point is just its value).
+      - temp: Avg of the daily midpoint (temp_min + temp_max) / 2
+      - precip weekly: Sum / Count(DISTINCT point) (per-point weekly total,
+        averaged across points for national aggregates)
+      - precip daily: Avg across points
     """
     qs = HistoricalActual.objects.all()
     if point_id is not None:
@@ -600,10 +640,8 @@ def _historical_series(country=None, point_id=None, granularity="w", metric="t")
         qs = qs.filter(point__country=country)
 
     if granularity == "d":
-        # Day-of-year pairs with the calendar year
         qs = qs.annotate(year=ExtractYear("date"), x=_ExtractDoy("date"))
     else:
-        # ISO week pairs with the ISO year (Dec 29–31 can belong to week 1 of the next year)
         qs = qs.annotate(year=ExtractIsoYear("date"), x=ExtractWeek("date"))
 
     if metric == "p":
@@ -624,6 +662,30 @@ def _historical_series(country=None, point_id=None, granularity="w", metric="t")
     )
 
 
+def _historical_span(country=None, point_id=None, days=16, metric="t"):
+    """
+    Recent ERA5 actuals as a simple date series over the last `days` days
+    (national average across points, or a single point). Feeds the
+    krátkodobá/střednědobá/dlouhodobá spans on the Historie page.
+    """
+    since = date.today() - timedelta(days=days)
+    qs = HistoricalActual.objects.filter(date__gte=since)
+    if point_id is not None:
+        qs = qs.filter(point_id=point_id)
+    elif country is not None:
+        qs = qs.filter(point__country=country)
+
+    value = Avg("precip_mm") if metric == "p" else Avg((F("temp_min") + F("temp_max")) / 2.0)
+    rows = qs.values("date").annotate(value=value).order_by("date")
+    return {
+        "dates": [r["date"].isoformat() for r in rows if r["value"] is not None],
+        "values": [round(r["value"], 1) for r in rows if r["value"] is not None],
+    }
+
+
+ROZSAH_DAYS = {"kratka": 16, "stredni": 120, "dlouha": 214}
+
+
 @login_required
 def historie(request):
     points = list(WeatherPoint.objects.order_by("country", "name"))
@@ -635,6 +697,12 @@ def historie(request):
     metric = request.GET.get("m", "t")
     if metric not in ("t", "p"):
         metric = "t"
+    rozsah = request.GET.get("rozsah", "plna")
+    if rozsah not in ("kratka", "stredni", "dlouha", "plna"):
+        rozsah = "plna"
+    rezim = request.GET.get("rezim", "abs")
+    if rezim not in ("abs", "pct"):
+        rezim = "abs"
 
     country = None
     point_id = None
@@ -649,32 +717,77 @@ def historie(request):
         else:
             point_id, selection_label = point.pk, f"{point.name} ({point.country})"
 
-    rows = _historical_series(country=country, point_id=point_id, granularity=gran, metric=metric)
+    if rozsah != "plna":
+        # Recent-actuals span: simple date series, no overlay
+        span = _historical_span(
+            country=country, point_id=point_id,
+            days=ROZSAH_DAYS[rozsah], metric=metric,
+        )
+        chart = {"mode": "span", "rozsah": rozsah, "metric": metric, **span}
+        has_data = bool(span["dates"])
+    else:
+        rows = _historical_series(country=country, point_id=point_id, granularity=gran, metric=metric)
 
-    # One trace per year: {year, x: [...], values: [...]}
-    by_year = {}
-    for r in rows:
-        if r["value"] is None:
-            continue
-        by_year.setdefault(r["year"], {"x": [], "values": []})
-        by_year[r["year"]]["x"].append(int(r["x"]))
-        by_year[r["year"]]["values"].append(round(r["value"], 1))
+        by_year = {}
+        for r in rows:
+            if r["value"] is None:
+                continue
+            by_year.setdefault(r["year"], {"x": [], "values": []})
+            by_year[r["year"]]["x"].append(int(r["x"]))
+            by_year[r["year"]]["values"].append(round(r["value"], 1))
 
-    chart = {
-        "granularity": gran,
-        "metric": metric,
-        "years": [
-            {"year": y, "x": s["x"], "values": s["values"]}
-            for y, s in sorted(by_year.items())
-        ],
-    }
+        current_year = max(by_year) if by_year else None
+
+        # Similarity % of each year vs the current year over overlapping x:
+        # 100 % = identical, each °C (or mm) of mean abs difference costs 12.5 pts.
+        cur_map = dict(zip(by_year[current_year]["x"], by_year[current_year]["values"])) if current_year else {}
+        for year, s in by_year.items():
+            if year == current_year or not cur_map:
+                s["sim"] = None
+                continue
+            diffs = [abs(v - cur_map[x]) for x, v in zip(s["x"], s["values"]) if x in cur_map]
+            s["sim"] = max(0, round(100 - (sum(diffs) / len(diffs)) * 12.5)) if diffs else None
+
+        # Percentage mode: deviation from the all-years average per x,
+        # normalized by the seasonal amplitude so values stay sane around 0 °C.
+        if rezim == "pct" and by_year:
+            clim = defaultdict(list)
+            for s in by_year.values():
+                for x, v in zip(s["x"], s["values"]):
+                    clim[x].append(v)
+            clim_avg = {x: sum(vs) / len(vs) for x, vs in clim.items()}
+            amplitude = (max(clim_avg.values()) - min(clim_avg.values())) or 1.0
+            for s in by_year.values():
+                s["values"] = [
+                    round((v - clim_avg[x]) / amplitude * 100, 1)
+                    for x, v in zip(s["x"], s["values"])
+                ]
+
+        chart = {
+            "mode": "overlay",
+            "granularity": gran,
+            "metric": metric,
+            "rezim": rezim,
+            "years": [
+                {
+                    "year": y,
+                    "x": s["x"],
+                    "values": s["values"],
+                    "name": f"{y} · {s['sim']} %" if s.get("sim") is not None else str(y),
+                }
+                for y, s in sorted(by_year.items())
+            ],
+        }
+        has_data = bool(by_year)
 
     return render(request, "notes/historie.html", {
         "chart_json": chart,  # raw dict — json_script serializes it (never pre-dump!)
-        "has_data": bool(chart["years"]),
+        "has_data": has_data,
         "points": points,
         "sel": sel,
         "gran": gran,
         "metric": metric,
+        "rozsah": rozsah,
+        "rezim": rezim,
         "selection_label": selection_label,
     })

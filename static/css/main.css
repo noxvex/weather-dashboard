@@ -457,9 +457,9 @@ a:hover { text-decoration: underline; }
 .badge-pinned  { background: rgba(74,158,255,.14); color: var(--accent); }
 
 /* Country chips on notes: CZ / SR / both */
-.badge-country { background: rgba(138,151,173,.14); color: var(--muted); }
-.badge-country.cz { background: rgba(74,158,255,.14); color: var(--accent); }
-.badge-country.sk { background: rgba(45,212,191,.12); color: var(--teal); }
+.badge-country { background: rgba(138,151,173,.16); color: var(--muted); border: 1px solid rgba(138,151,173,.3); }
+.badge-country.cz { background: rgba(74,158,255,.18); color: var(--accent); border: 1px solid rgba(74,158,255,.4); }
+.badge-country.sk { background: rgba(251,113,133,.16); color: #FB7185; border: 1px solid rgba(251,113,133,.4); }
 
 .note-body { font-size: 14px; line-height: 1.7; color: var(--text); white-space: pre-wrap; }
 
@@ -954,3 +954,140 @@ hr { border: none; border-top: 1px solid var(--border); margin: 1.25rem 0; }
     color: var(--muted);
     font-size: 13px;
 }
+
+/* ── Seg links (anchor variant of seg buttons, e.g. Historie ranges) ── */
+.seg a.seg-link {
+    flex: 1;
+    text-align: center;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    color: var(--muted);
+    font-size: 14px;
+    font-weight: 600;
+    padding: 12px 8px;
+    line-height: 1.35;
+    transition: all .18s;
+    text-decoration: none;
+}
+
+.seg a.seg-link small { display: block; font-size: 11px; opacity: .7; font-weight: 400; }
+.seg a.seg-link:hover { color: var(--text); text-decoration: none; }
+
+.seg a.seg-short.on {
+    background: linear-gradient(160deg, rgba(74,158,255,.28), rgba(74,158,255,.10));
+    color: #fff; border-color: rgba(74,158,255,.5);
+    box-shadow: 0 0 16px rgba(74,158,255,.3);
+}
+.seg a.seg-mid.on {
+    background: linear-gradient(160deg, rgba(251,191,36,.26), rgba(251,191,36,.08));
+    color: #fff; border-color: rgba(251,191,36,.5);
+    box-shadow: 0 0 16px rgba(251,191,36,.28);
+}
+.seg a.seg-long.on {
+    background: linear-gradient(160deg, rgba(52,211,153,.26), rgba(52,211,153,.08));
+    color: #fff; border-color: rgba(52,211,153,.5);
+    box-shadow: 0 0 16px rgba(52,211,153,.28);
+}
+.seg a.seg-full.on {
+    background: linear-gradient(160deg, rgba(232,237,245,.18), rgba(232,237,245,.06));
+    color: #fff; border-color: rgba(232,237,245,.35);
+    box-shadow: 0 0 16px rgba(232,237,245,.15);
+}
+
+/* ── Historie view-mode buttons (moved from inline template style) ── */
+.mode-btn {
+    background: var(--surface);
+    color: var(--muted);
+    border: 1px solid #243044;
+    border-radius: 6px;
+    padding: 7px 13px;
+    font: 500 13px 'Inter', sans-serif;
+    cursor: pointer;
+    transition: all .15s;
+    text-decoration: none;
+    display: inline-block;
+}
+.mode-btn:hover { border-color: rgba(74,158,255,.4); color: #E8EDF5; text-decoration: none; }
+.mode-btn.active { background: rgba(74,158,255,.14); border-color: var(--accent); color: var(--accent); }
+
+/* ── Expandable CZ/SK bars (22-point list) ─────────────── */
+.pt-group { margin-bottom: 6px; }
+.pt-group summary::-webkit-details-marker { display: none; }
+
+.pt-bar {
+    list-style: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 13px;
+    border-radius: 9px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    user-select: none;
+    transition: filter .15s;
+}
+.pt-bar:hover { filter: brightness(1.15); }
+.pt-bar::after { content: '▾'; font-size: 11px; opacity: .6; margin-left: 8px; }
+.pt-group:not([open]) .pt-bar::after { content: '▸'; }
+.pt-count { font-size: 11px; font-weight: 500; opacity: .75; margin-left: auto; }
+
+.pt-bar.pt-cz {
+    background: linear-gradient(90deg, rgba(74,158,255,.20), rgba(74,158,255,.05));
+    color: var(--accent);
+    border: 1px solid rgba(74,158,255,.3);
+}
+.pt-bar.pt-sk {
+    background: linear-gradient(90deg, rgba(251,113,133,.18), rgba(251,113,133,.05));
+    color: #FB7185;
+    border: 1px solid rgba(251,113,133,.3);
+}
+
+/* ── Feed scroll + pagination ──────────────────────────── */
+.feed-scroll {
+    max-height: 68vh;
+    overflow-y: auto;
+    padding-right: 6px;
+}
+.feed-scroll::-webkit-scrollbar { width: 4px; }
+.feed-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.pagination {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    margin-top: 14px;
+}
+
+.page-btn {
+    min-width: 34px;
+    text-align: center;
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    transition: all .15s;
+}
+.page-btn:hover { color: var(--text); background: var(--border); text-decoration: none; }
+.page-btn.on { background: rgba(74,158,255,.16); border-color: rgba(74,158,255,.45); color: var(--accent); }
+
+/* ── System report rows (Bod page) ─────────────────────── */
+.report-row {
+    border-left: 3px solid var(--muted);
+    border-radius: 8px;
+    background: rgba(19,28,46,.5);
+    padding: 10px 13px;
+    margin-bottom: 8px;
+}
+.report-row.note--h-short { border-left-color: var(--h-short); }
+.report-row.note--h-mid   { border-left-color: var(--h-mid); }
+.report-row.note--h-long  { border-left-color: var(--h-long); }
+
+.report-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 5px; }
+.report-body { font-size: 13.5px; line-height: 1.6; color: var(--text); }

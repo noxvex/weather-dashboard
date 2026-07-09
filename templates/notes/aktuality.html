@@ -105,6 +105,7 @@
             <div class="feed-empty">Žádné poznámky pro zvolený filtr.</div>
         {% endif %}
 
+        <div class="feed-scroll">
         {% for note in notes %}
             <div class="note-card
                 {% if note.is_system %}note--h-{{ note.horizon }}
@@ -163,6 +164,26 @@
                 {% endif %}
             </div>
         {% endfor %}
+        </div>
+
+        {# Pagination — keeps the feed short instead of one endless page #}
+        {% if page_obj.paginator.num_pages > 1 %}
+        <div class="pagination">
+            {% if page_obj.has_previous %}
+                <a class="page-btn" href="?autor={{ active_filter }}&strana={{ page_obj.previous_page_number }}">‹</a>
+            {% endif %}
+            {% for n in page_obj.paginator.page_range %}
+                {% if n == page_obj.number %}
+                    <span class="page-btn on">{{ n }}</span>
+                {% else %}
+                    <a class="page-btn" href="?autor={{ active_filter }}&strana={{ n }}">{{ n }}</a>
+                {% endif %}
+            {% endfor %}
+            {% if page_obj.has_next %}
+                <a class="page-btn" href="?autor={{ active_filter }}&strana={{ page_obj.next_page_number }}">›</a>
+            {% endif %}
+        </div>
+        {% endif %}
     </div>
 
     {# ════ RIGHT — weather sidebar ════ #}
@@ -191,39 +212,43 @@
             <div class="card-title">Všech 22 bodů <span class="hint">dnes · fakta</span></div>
 
             {% if cz_points %}
-            <div class="fc-group-label">Česká republika</div>
-            {% for row in cz_points %}
-                {% with t_min=row.temperature_min|default:0 t_max=row.temperature_max|default:0 %}
-                <div class="fc-row fc-row--point">
-                    <span class="fc-day">{{ row.point.name }}</span>
-                    <span class="fc-icon">{{ row.weather_code|weather_icon }}</span>
-                    <span class="fc-range">
-                        {{ t_min|temp_round }}°
-                        <span class="fc-track"><span class="fc-fill" style="left:15%; width:70%;"></span></span>
-                        {{ t_max|temp_round }}°
-                    </span>
-                    <span class="fc-rain">{% if row.precipitation_sum is not None %}{{ row.precipitation_sum }}&thinsp;mm{% else %}—{% endif %}</span>
-                </div>
-                {% endwith %}
-            {% endfor %}
+            <details class="pt-group" open>
+                <summary class="pt-bar pt-cz">Česká republika <span class="pt-count">{{ cz_points|length }} bodů</span></summary>
+                {% for row in cz_points %}
+                    {% with t_min=row.temperature_min|default:0 t_max=row.temperature_max|default:0 %}
+                    <div class="fc-row fc-row--point">
+                        <span class="fc-day">{{ row.point.name }}</span>
+                        <span class="fc-icon">{{ row.weather_code|weather_icon }}</span>
+                        <span class="fc-range">
+                            {{ t_min|temp_round }}°
+                            <span class="fc-track"><span class="fc-fill" style="left:15%; width:70%;"></span></span>
+                            {{ t_max|temp_round }}°
+                        </span>
+                        <span class="fc-rain">{% if row.precipitation_sum is not None %}{{ row.precipitation_sum }}&thinsp;mm{% else %}—{% endif %}</span>
+                    </div>
+                    {% endwith %}
+                {% endfor %}
+            </details>
             {% endif %}
 
             {% if sk_points %}
-            <div class="fc-group-label">Slovensko</div>
-            {% for row in sk_points %}
-                {% with t_min=row.temperature_min|default:0 t_max=row.temperature_max|default:0 %}
-                <div class="fc-row fc-row--point">
-                    <span class="fc-day">{{ row.point.name }}</span>
-                    <span class="fc-icon">{{ row.weather_code|weather_icon }}</span>
-                    <span class="fc-range">
-                        {{ t_min|temp_round }}°
-                        <span class="fc-track"><span class="fc-fill" style="left:15%; width:70%;"></span></span>
-                        {{ t_max|temp_round }}°
-                    </span>
-                    <span class="fc-rain">{% if row.precipitation_sum is not None %}{{ row.precipitation_sum }}&thinsp;mm{% else %}—{% endif %}</span>
-                </div>
-                {% endwith %}
-            {% endfor %}
+            <details class="pt-group" open>
+                <summary class="pt-bar pt-sk">Slovensko <span class="pt-count">{{ sk_points|length }} bodů</span></summary>
+                {% for row in sk_points %}
+                    {% with t_min=row.temperature_min|default:0 t_max=row.temperature_max|default:0 %}
+                    <div class="fc-row fc-row--point">
+                        <span class="fc-day">{{ row.point.name }}</span>
+                        <span class="fc-icon">{{ row.weather_code|weather_icon }}</span>
+                        <span class="fc-range">
+                            {{ t_min|temp_round }}°
+                            <span class="fc-track"><span class="fc-fill" style="left:15%; width:70%;"></span></span>
+                            {{ t_max|temp_round }}°
+                        </span>
+                        <span class="fc-rain">{% if row.precipitation_sum is not None %}{{ row.precipitation_sum }}&thinsp;mm{% else %}—{% endif %}</span>
+                    </div>
+                    {% endwith %}
+                {% endfor %}
+            </details>
             {% endif %}
 
             {% if not cz_points and not sk_points %}

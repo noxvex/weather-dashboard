@@ -111,6 +111,14 @@ class Command(BaseCommand):
     help = "Detect weather change patterns in forecast history and create system_change notes."
 
     def handle(self, *args, **options):
+        # Expiry: system reports vanish after 14 days unless someone pinned them
+        cutoff = timezone.now() - timedelta(days=14)
+        purged, _ = Note.objects.filter(
+            note_type__startswith="system_", is_pinned=False, created_at__lt=cutoff,
+        ).delete()
+        if purged:
+            self.stdout.write(f"Purged {purged} expired unpinned system note(s).")
+
         author = _get_system_user()
         if not author:
             self.stderr.write("No superuser found to author system notes. Run seed_points first.")
