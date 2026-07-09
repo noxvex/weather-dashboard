@@ -9,36 +9,17 @@
 
 {% block content %}
 
-{# ── Hero: national temperatures ── #}
-{% if forecast_date %}
-<div class="hero">
-    <div class="hero-temps">
-        <div class="hero-nation">
-            <div class="hero-label">ČESKO</div>
-            <div class="hero-num">{% if cz_avg.temperature_max is not None %}{{ cz_avg.temperature_max|temp_round }}°{% else %}—{% endif %}</div>
-            <div class="hero-cond">
-                {% if cz_points %}{{ cz_points|length }} bod{% if cz_points|length >= 5 %}ů{% elif cz_points|length >= 2 %}y{% else %}{% endif %}{% endif %}
-                · {{ forecast_date|date:"j. n. Y" }}
-            </div>
-        </div>
-        <div class="hero-nation" style="text-align:right">
-            <div class="hero-label">SLOVENSKO</div>
-            <div class="hero-num">{% if sk_avg.temperature_max is not None %}{{ sk_avg.temperature_max|temp_round }}°{% else %}—{% endif %}</div>
-            <div class="hero-cond" style="justify-content:flex-end">
-                {% if sk_points %}{{ sk_points|length }} bod{% if sk_points|length >= 5 %}ů{% elif sk_points|length >= 2 %}y{% else %}{% endif %}{% endif %}
-            </div>
-        </div>
-    </div>
-</div>
-{% endif %}
+<div class="eyebrow">Přehled</div>
 
-{# ── Temperature chart ── #}
-<div class="card">
-    <div class="card-title">Vývoj teploty <span class="hint">ČR + SK průměr</span></div>
+{# ══════════ Forecast graph (instrument panel) ══════════ #}
+<div class="card chart-card">
+    <div class="card-title">Vývoj teploty <span class="hint">ČR + SK národní průměr</span></div>
     <div class="seg">
-        <button class="on" id="seg-aktualni">Aktuální<small>1–16 dní</small></button>
-        <button class="soon" title="Data se sbírají od této verze">Střednědobá<small>14–46 dní · sbírá se</small></button>
-        <button class="soon" title="Data se sbírají od této verze">Dlouhodobá<small>6 měsíců · sbírá se</small></button>
+        <button class="on" data-mode="short" id="seg-short">Krátkodobá<small>1–16 dní</small></button>
+        <button data-mode="seasonal" id="seg-seasonal"
+                {% if not has_seasonal %}class="soon" title="Data se sbírají"{% endif %}>
+            Střednědobá<small>do 7 měsíců · SEAS5</small>
+        </button>
     </div>
     <div class="chart-wrap">
         <div id="main-chart"></div>
@@ -46,16 +27,50 @@
             🗂 Data se sbírají — zobrazení dostupné jakmile budou první snímky
         </div>
     </div>
+
+    {# ── Revize surfaced under the graph (existing pattern, not rebuilt) ── #}
+    <div class="graph-revize">
+        {% if revision_summary %}
+            <div class="graph-revize-head">
+                <span class="card-title" style="margin:0;">Revize předpovědi</span>
+                <span class="rev-tiny" style="margin:0;">
+                    {{ revision_summary.previous_batch|date:"j. n." }} → {{ revision_summary.latest_batch|date:"j. n." }}
+                    · {{ revision_summary.total }} změn ≥ 0,5 °C
+                </span>
+            </div>
+            {% if revision_summary.top %}
+                {% for r in revision_summary.top %}
+                <div class="delta-row">
+                    <span><span class="country-chip">{{ r.country }}</span> &nbsp;{{ r.date|date:"j. n." }}</span>
+                    {% if r.delta > 0 %}
+                        <span class="d-chip d-chip-up">+{{ r.delta }} °C</span>
+                    {% else %}
+                        <span class="d-chip d-chip-down">{{ r.delta }} °C</span>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="rev-tiny">Žádné výrazné změny mezi posledními dvěma snímky.</div>
+            {% endif %}
+            <a href="{% url 'notes:revision_tracker' %}" class="rev-tiny" style="display:inline-block; margin-top:8px; color:var(--accent);">Všechny revize →</a>
+        {% else %}
+            <div class="graph-revize-head">
+                <span class="card-title" style="margin:0;">Revize předpovědi</span>
+            </div>
+            <div class="rev-tiny">Revize se zobrazí po alespoň dvou denních snímcích předpovědi.
+                <a href="{% url 'notes:revision_tracker' %}" style="color:var(--accent);">Zobrazit →</a>
+            </div>
+        {% endif %}
+    </div>
 </div>
 
-{# ── Two-column layout: notes feed + sidebar ── #}
+{# ══════════ Two-column: notes feed + weather sidebar ══════════ #}
 <div class="ak-grid">
 
-    {# ════ LEFT — notes feed ════ #}
+    {# ════ LEFT — notes feed (unchanged) ════ #}
     <div>
         <div class="eyebrow">Aktuality</div>
 
-        {# Since-login banner — only on mobile / above feed #}
         {% if since_login %}
         <p class="page-sub">
             naposledy přihlášen(a) {{ request.user.last_login|date:"j. n. Y, H:i" }}
@@ -63,7 +78,6 @@
         </p>
         {% endif %}
 
-        {# Filter chips #}
         <div class="filter-bar">
             {% for value, label in filter_chips %}
                 <a href="?autor={{ value }}"
@@ -128,7 +142,6 @@
             </div>
         {% endfor %}
 
-        {# Inline composer #}
         <div class="card" style="margin-top:4px;">
             <form method="post" action="{% url 'notes:create' %}">
                 {% csrf_token %}
@@ -141,8 +154,72 @@
         </div>
     </div>
 
-    {# ════ RIGHT — sidebar ════ #}
+    {# ════ RIGHT — weather sidebar ════ #}
     <aside class="ak-sidebar">
+
+        {# Headline CZ/SK numbers — large, do NOT shrink in sizing pass #}
+        {% if forecast_date %}
+        <div class="card headline-card">
+            <div class="card-title">Národní teplota <span class="hint">{{ forecast_date|date:"j. n. Y" }}</span></div>
+            <div class="headline-nums">
+                <div class="headline-nation">
+                    <div class="hl-label">ČESKO</div>
+                    <div class="temp-big">{% if cz_avg.temperature_max is not None %}{{ cz_avg.temperature_max|temp_round }}&thinsp;°{% else %}—{% endif %}</div>
+                    <div class="temp-range">min&thinsp;{% if cz_avg.temperature_min is not None %}{{ cz_avg.temperature_min|temp_round }}&thinsp;°{% else %}—{% endif %}</div>
+                </div>
+                <div class="headline-nation">
+                    <div class="hl-label">SLOVENSKO</div>
+                    <div class="temp-big">{% if sk_avg.temperature_max is not None %}{{ sk_avg.temperature_max|temp_round }}&thinsp;°{% else %}—{% endif %}</div>
+                    <div class="temp-range">min&thinsp;{% if sk_avg.temperature_min is not None %}{{ sk_avg.temperature_min|temp_round }}&thinsp;°{% else %}—{% endif %}</div>
+                </div>
+            </div>
+        </div>
+
+        {# Compact facts-only list of all 22 points — iOS-style fc-row #}
+        <div class="card">
+            <div class="card-title">Všech 22 bodů <span class="hint">dnes · fakta</span></div>
+
+            {% if cz_points %}
+            <div class="fc-group-label">Česká republika</div>
+            {% for row in cz_points %}
+                {% with t_min=row.temperature_min|default:0 t_max=row.temperature_max|default:0 %}
+                <div class="fc-row fc-row--point">
+                    <span class="fc-day">{{ row.point.name }}</span>
+                    <span class="fc-icon">{{ row.weather_code|weather_icon }}</span>
+                    <span class="fc-range">
+                        {{ t_min|temp_round }}°
+                        <span class="fc-track"><span class="fc-fill" style="left:15%; width:70%;"></span></span>
+                        {{ t_max|temp_round }}°
+                    </span>
+                    <span class="fc-rain">{% if row.precipitation_sum is not None %}{{ row.precipitation_sum }}&thinsp;mm{% else %}—{% endif %}</span>
+                </div>
+                {% endwith %}
+            {% endfor %}
+            {% endif %}
+
+            {% if sk_points %}
+            <div class="fc-group-label">Slovensko</div>
+            {% for row in sk_points %}
+                {% with t_min=row.temperature_min|default:0 t_max=row.temperature_max|default:0 %}
+                <div class="fc-row fc-row--point">
+                    <span class="fc-day">{{ row.point.name }}</span>
+                    <span class="fc-icon">{{ row.weather_code|weather_icon }}</span>
+                    <span class="fc-range">
+                        {{ t_min|temp_round }}°
+                        <span class="fc-track"><span class="fc-fill" style="left:15%; width:70%;"></span></span>
+                        {{ t_max|temp_round }}°
+                    </span>
+                    <span class="fc-rain">{% if row.precipitation_sum is not None %}{{ row.precipitation_sum }}&thinsp;mm{% else %}—{% endif %}</span>
+                </div>
+                {% endwith %}
+            {% endfor %}
+            {% endif %}
+
+            {% if not cz_points and not sk_points %}
+                <div class="no-data">Žádná předpovědní data. Spusťte <code>ingest_weather</code>.</div>
+            {% endif %}
+        </div>
+        {% endif %}
 
         {# Since-login delta card #}
         {% if since_login %}
@@ -178,86 +255,10 @@
         </div>
         {% endif %}
 
-        {# Revision tracker link card #}
-        <div class="card">
-            <div class="card-title">Revize předpovědí <span class="hint">porovnání snímků</span></div>
-            <div style="font-size:12px; color:var(--muted); margin-bottom:10px;">
-                Sleduje, jak se předpověď mění den po dni pro každý bod.
-            </div>
-            <a href="{% url 'notes:revision_tracker' %}" class="btn btn-ghost btn-full">
-                Zobrazit revize →
-            </a>
-        </div>
-
-        {# Current weather — CZ #}
-        {% if forecast_date %}
-        <div class="weather-card">
-            <div class="weather-country-header">
-                <span class="country-name">Česká republika</span>
-                <span class="weather-date">{{ forecast_date|date:"j. n. Y" }}</span>
-            </div>
-            {% if cz_avg %}
-                <div class="weather-headline">
-                    <div>
-                        <div class="temp-big">{% if cz_avg.temperature_max is not None %}{{ cz_avg.temperature_max }}&thinsp;°C{% else %}—{% endif %}</div>
-                        <div class="temp-range">min&thinsp;{% if cz_avg.temperature_min is not None %}{{ cz_avg.temperature_min }}&thinsp;°C{% else %}—{% endif %}</div>
-                    </div>
-                    <div class="precip-headline">
-                        <span>Srážky</span>
-                        <strong>{% if cz_avg.precipitation_sum is not None %}{{ cz_avg.precipitation_sum }}&thinsp;mm{% else %}—{% endif %}</strong>
-                    </div>
-                </div>
-                <div class="weather-points">
-                    {% for row in cz_points %}
-                        <div class="wp-row">
-                            <span class="wp-name">{{ row.point.name }}</span>
-                            <span class="wp-temp">{% if row.temperature_max is not None %}{{ row.temperature_max }}&thinsp;°C{% else %}—{% endif %}</span>
-                            <span class="wp-precip">{% if row.precipitation_sum is not None %}{{ row.precipitation_sum }}&thinsp;mm{% else %}—{% endif %}</span>
-                        </div>
-                    {% endfor %}
-                </div>
-            {% else %}
-                <div class="no-data">Žádná data pro CZ.</div>
-            {% endif %}
-        </div>
-
-        {# Current weather — SK #}
-        <div class="weather-card">
-            <div class="weather-country-header">
-                <span class="country-name">Slovensko</span>
-                <span class="weather-date">{{ forecast_date|date:"j. n. Y" }}</span>
-            </div>
-            {% if sk_avg %}
-                <div class="weather-headline">
-                    <div>
-                        <div class="temp-big">{% if sk_avg.temperature_max is not None %}{{ sk_avg.temperature_max }}&thinsp;°C{% else %}—{% endif %}</div>
-                        <div class="temp-range">min&thinsp;{% if sk_avg.temperature_min is not None %}{{ sk_avg.temperature_min }}&thinsp;°C{% else %}—{% endif %}</div>
-                    </div>
-                    <div class="precip-headline">
-                        <span>Srážky</span>
-                        <strong>{% if sk_avg.precipitation_sum is not None %}{{ sk_avg.precipitation_sum }}&thinsp;mm{% else %}—{% endif %}</strong>
-                    </div>
-                </div>
-                <div class="weather-points">
-                    {% for row in sk_points %}
-                        <div class="wp-row">
-                            <span class="wp-name">{{ row.point.name }}</span>
-                            <span class="wp-temp">{% if row.temperature_max is not None %}{{ row.temperature_max }}&thinsp;°C{% else %}—{% endif %}</span>
-                            <span class="wp-precip">{% if row.precipitation_sum is not None %}{{ row.precipitation_sum }}&thinsp;mm{% else %}—{% endif %}</span>
-                        </div>
-                    {% endfor %}
-                </div>
-            {% else %}
-                <div class="no-data">Žádná data pre SK.</div>
-            {% endif %}
-        </div>
-        {% endif %}
-
         {# Year-over-year lock / coming-soon #}
         {% if not has_historical %}
         <div class="lock-card">
             🔒 Meziroční srovnání — zobrazí se po doplnění historických dat (ERA5).
-            Spusťte <code style="background:rgba(74,158,255,.12); color:var(--accent); padding:1px 5px; border-radius:3px; font-size:11px;">fetch_era5_backfill</code> pro první data.
         </div>
         {% endif %}
 
@@ -268,89 +269,79 @@
 
 {% block extra_js %}
 {{ chart_json|json_script:"chart-data" }}
+{{ seasonal_json|json_script:"seasonal-data" }}
 <script>
 (function () {
-    const raw = JSON.parse(document.getElementById('chart-data').textContent);
-    const traces = [];
-
-    if (raw.cz && raw.cz.length) {
-        traces.push({
-            x: raw.cz.map(d => d.date),
-            y: raw.cz.map(d => d.temp),
-            type: 'scatter', mode: 'lines', name: 'ČR',
-            line: { color: '#4A9EFF', width: 2.5, shape: 'spline' },
-            fill: 'tozeroy', fillcolor: 'rgba(74,158,255,0.10)',
-            hovertemplate: '%{y:.1f}°C<extra>ČR</extra>',
-        });
-    }
-    if (raw.sk && raw.sk.length) {
-        traces.push({
-            x: raw.sk.map(d => d.date),
-            y: raw.sk.map(d => d.temp),
-            type: 'scatter', mode: 'lines', name: 'SR',
-            line: { color: '#2DD4BF', width: 2, shape: 'spline' },
-            fill: 'tozeroy', fillcolor: 'rgba(45,212,191,0.06)',
-            hovertemplate: '%{y:.1f}°C<extra>SR</extra>',
-        });
-    }
+    const shortData = JSON.parse(document.getElementById('chart-data').textContent);
+    const seasonalData = JSON.parse(document.getElementById('seasonal-data').textContent);
 
     const layout = {
         paper_bgcolor: 'transparent',
         plot_bgcolor:  'transparent',
-        font: { color: '#8A97AD', family: 'Inter, sans-serif', size: 10 },
-        margin: { t: 6, r: 10, b: 34, l: 36 },
+        font: { color: '#8A97AD', family: 'Inter, sans-serif', size: 11 },
+        margin: { t: 10, r: 14, b: 38, l: 42 },
         xaxis: {
-            gridcolor: 'rgba(36,48,68,0.6)',
-            tickcolor: 'transparent',
-            tickfont: { size: 10, color: '#8A97AD' },
-            showline: false,
-            type: 'date',
+            gridcolor: 'rgba(36,48,68,0.6)', tickcolor: 'transparent',
+            tickfont: { size: 11, color: '#8A97AD' }, showline: false, type: 'date',
         },
         yaxis: {
-            gridcolor: 'rgba(36,48,68,0.5)',
-            tickcolor: 'transparent',
-            tickfont: { size: 10, color: '#8A97AD' },
-            showline: false,
-            ticksuffix: '°',
-            zeroline: false,
+            gridcolor: 'rgba(36,48,68,0.5)', tickcolor: 'transparent',
+            tickfont: { size: 11, color: '#8A97AD' }, showline: false,
+            ticksuffix: '°', zeroline: false,
         },
-        legend: {
-            font: { size: 10, color: '#8A97AD' },
-            bgcolor: 'transparent',
-            orientation: 'h',
-            x: 0, y: 1.12,
-        },
+        legend: { font: { size: 11, color: '#8A97AD' }, bgcolor: 'transparent', orientation: 'h', x: 0, y: 1.1 },
         hovermode: 'x unified',
-        hoverlabel: {
-            bgcolor: '#131C2E',
-            bordercolor: '#243044',
-            font: { color: '#E8EDF5', size: 12 },
-        },
+        hoverlabel: { bgcolor: '#131C2E', bordercolor: '#243044', font: { color: '#E8EDF5', size: 12 } },
     };
-
     const config = { displayModeBar: false, responsive: true };
 
-    if (traces.length) {
-        Plotly.newPlot('main-chart', traces, layout, config);
-    } else {
-        document.getElementById('main-chart').style.display = 'none';
-        document.getElementById('chart-soon').style.display = 'block';
+    function buildTraces(data) {
+        const traces = [];
+        if (data.cz && data.cz.length) {
+            traces.push({
+                x: data.cz.map(d => d.date), y: data.cz.map(d => d.temp),
+                type: 'scatter', mode: 'lines', name: 'ČR',
+                line: { color: '#4A9EFF', width: 2.5, shape: 'spline' },
+                fill: 'tozeroy', fillcolor: 'rgba(74,158,255,0.10)',
+                hovertemplate: '%{y:.1f}°C<extra>ČR</extra>',
+            });
+        }
+        if (data.sk && data.sk.length) {
+            traces.push({
+                x: data.sk.map(d => d.date), y: data.sk.map(d => d.temp),
+                type: 'scatter', mode: 'lines', name: 'SR',
+                line: { color: '#2DD4BF', width: 2, shape: 'spline' },
+                fill: 'tozeroy', fillcolor: 'rgba(45,212,191,0.06)',
+                hovertemplate: '%{y:.1f}°C<extra>SR</extra>',
+            });
+        }
+        return traces;
     }
 
-    // Segmented control — "soon" buttons show coming-soon message
-    document.querySelectorAll('.seg button').forEach(btn => {
+    function draw(data) {
+        const traces = buildTraces(data);
+        const chartEl = document.getElementById('main-chart');
+        const soonEl = document.getElementById('chart-soon');
+        if (traces.length) {
+            chartEl.style.display = '';
+            soonEl.style.display = 'none';
+            Plotly.react('main-chart', traces, layout, config);
+        } else {
+            chartEl.style.display = 'none';
+            soonEl.style.display = 'block';
+        }
+    }
+
+    // Initial draw = krátkodobá (short-range)
+    draw(shortData);
+
+    // Switcher — actually swaps the data source, not just the label
+    document.querySelectorAll('.seg button[data-mode]').forEach(btn => {
         btn.addEventListener('click', function () {
-            if (this.classList.contains('soon')) {
-                document.querySelectorAll('.seg button').forEach(b => b.classList.remove('on'));
-                this.classList.add('on');
-                document.getElementById('main-chart').style.display = 'none';
-                document.getElementById('chart-soon').style.display = 'block';
-            } else {
-                document.querySelectorAll('.seg button').forEach(b => b.classList.remove('on'));
-                this.classList.add('on');
-                document.getElementById('main-chart').style.display = '';
-                document.getElementById('chart-soon').style.display = 'none';
-            }
+            if (this.classList.contains('soon')) return;  // no data yet
+            document.querySelectorAll('.seg button').forEach(b => b.classList.remove('on'));
+            this.classList.add('on');
+            draw(this.dataset.mode === 'seasonal' ? seasonalData : shortData);
         });
     });
 }());

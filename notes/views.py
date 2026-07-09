@@ -9,7 +9,7 @@ from django.contrib.auth.decorators import login_required
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 
-from ingest.models import DailyForecast, HistoricalActual, WeatherPoint
+from ingest.models import DailyForecast, HistoricalActual, MediumLongRangeForecast, WeatherPoint
 from .forms import NoteForm
 from .models import Note
 
@@ -173,6 +173,95 @@ def _get_chart_data():
     return result
 
 
+def _get_seasonal_chart_data():
+    """
+    Returns {cz: [{date, temp}, ...], sk: [...]} of SEAS5 seasonal mean temp
+    per target_date (national average), from the latest issued snapshot.
+    Feeds the main-page graph's "střednědobá" mode. Empty dict if no data yet.
+    """
+    latest = (
+        MediumLongRangeForecast.objects
+        .filter(horizon=MediumLongRangeForecast.HORIZON_SEAS5)
+        .order_by("-issued_at")
+        .values_list("issued_at", flat=True)
+        .first()
+    )
+    if not latest:
+        return {"cz": [], "sk": []}
+
+    rows = list(
+        MediumLongRangeForecast.objects
+        .filter(horizon=MediumLongRangeForecast.HORIZON_SEAS5, issued_at=latest)
+        .select_related("point")
+        .order_by("target_date")
+    )
+
+    by_country_date = {"CZ": defaultdict(list), "SK": defaultdict(list)}
+    for r in rows:
+        if r.point.country in by_country_date and r.temp_mean is not None:
+            by_country_date[r.point.country][r.target_date.isoformat()].append(r.temp_mean)
+
+    result = {}
+    for country, by_date in by_country_date.items():
+        result[country.lower()] = [
+            {"date": d, "temp": round(sum(vals) / len(vals), 1)}
+            for d, vals in sorted(by_date.items())
+        ]
+    return result
+
+
+def _get_revision_summary(limit=5):
+    """
+    Compact revision summary for the main page: the two most recent short-range
+    snapshots compared (same target_date, different issued_at) with the largest
+    national temp deltas. Surfaces the existing revision pattern — the full
+    detail lives on the revision_tracker page. Returns None if < 2 snapshots.
+    """
+    today = date.today()
+    batch_dates = list(
+        DailyForecast.objects
+        .filter(horizon=DailyForecast.HORIZON_SHORT, issued_at__isnull=False)
+        .order_by("-issued_at__date")
+        .values_list("issued_at__date", flat=True)
+        .distinct()[:2]
+    )
+    if len(batch_dates) < 2:
+        return None
+
+    latest, previous = batch_dates[0], batch_dates[1]
+
+    def nat_series(batch_date, country):
+        rows = DailyForecast.objects.filter(
+            horizon=DailyForecast.HORIZON_SHORT,
+            issued_at__date=batch_date,
+            point__country=country,
+            forecast_date__gte=today,
+        )
+        by_date = defaultdict(list)
+        for r in rows:
+            by_date[r.forecast_date].append(r)
+        return {fd: _avg(day_rows, "temperature_max") for fd, day_rows in by_date.items()}
+
+    deltas = []
+    for country, label in [("CZ", "ČR"), ("SK", "SR")]:
+        latest_s = nat_series(latest, country)
+        prev_s = nat_series(previous, country)
+        for fd in latest_s:
+            lt, pt = latest_s[fd], prev_s.get(fd)
+            if lt is not None and pt is not None:
+                d = round(lt - pt, 1)
+                if abs(d) >= 0.5:
+                    deltas.append({"country": label, "date": fd, "delta": d})
+
+    deltas.sort(key=lambda x: abs(x["delta"]), reverse=True)
+    return {
+        "latest_batch": latest,
+        "previous_batch": previous,
+        "total": len(deltas),
+        "top": deltas[:limit],
+    }
+
+
 # ── Author filter chips ─────────────────────────────────────────────────────
 
 FILTER_ALL = "vse"
@@ -219,7 +308,10 @@ def aktuality(request):
     # Pre-dumping here double-encodes: JSON.parse in the browser then yields a
     # string instead of an object and the chart silently renders nothing.
     chart_json = _get_chart_data()
+    seasonal_json = _get_seasonal_chart_data()
+    revision_summary = _get_revision_summary()
     has_historical = HistoricalActual.objects.exists()
+    has_seasonal = bool(seasonal_json.get("cz") or seasonal_json.get("sk"))
 
     return render(request, "notes/aktuality.html", {
         "notes": notes,
@@ -234,6 +326,9 @@ def aktuality(request):
         "filter_chips": filter_chips,
         "active_filter": autor,
         "chart_json": chart_json,
+        "seasonal_json": seasonal_json,
+        "has_seasonal": has_seasonal,
+        "revision_summary": revision_summary,
         "has_historical": has_historical,
     })
 

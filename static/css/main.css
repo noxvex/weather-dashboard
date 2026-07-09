@@ -280,7 +280,23 @@ a:hover { text-decoration: underline; }
 
 /* ── Chart ────────────────────────────────────────────── */
 .chart-wrap { position: relative; }
-#main-chart, #point-chart { height: 160px; }
+#point-chart { height: 160px; }
+#main-chart { height: 340px; }  /* bigger "instrument panel" graph on main page */
+
+/* ── Graph revize (surfaced under the main-page chart) ─── */
+.graph-revize {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(36,48,68,.7);
+}
+
+.graph-revize-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 8px;
+}
 
 .chart-soon {
     display: none;
@@ -503,6 +519,24 @@ a:hover { text-decoration: underline; }
 .fc-day   { width: 80px; color: var(--muted); font-size: 12px; }
 .fc-icon  { width: 26px; text-align: center; }
 
+/* Point-list variant of fc-row (reused on the main page for all 22 points) */
+.fc-row--point { padding: 8px 0; }
+.fc-row--point .fc-day {
+    width: 108px;
+    color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.fc-group-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    margin: 12px 0 4px;
+}
+.fc-group-label:first-child { margin-top: 2px; }
+
 .fc-range {
     flex: 1;
     display: flex;
@@ -563,6 +597,22 @@ a:hover { text-decoration: underline; }
 @media (max-width: 860px) {
     .ak-grid { grid-template-columns: 1fr; }
     .ak-sidebar { order: -1; }
+}
+
+/* ── Headline CZ/SK numbers (main-page right column) ──── */
+.headline-nums {
+    display: flex;
+    gap: 1rem;
+}
+
+.headline-nation { flex: 1; }
+
+.hl-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    margin-bottom: 4px;
 }
 
 /* ── Sidebar (weather + panels) ──────────────────────── */
