@@ -37,10 +37,32 @@
     </select>
 </form>
 
+{% if has_data %}
+{# View-mode toggle — pure client-side restyle, never reloads the page #}
+<div class="hist-mode" style="display:flex; gap:6px; margin:12px 0 0;">
+    <button type="button" class="mode-btn active" data-mode="a" onclick="setHistMode('a')">Zvýraznit aktuální rok</button>
+    <button type="button" class="mode-btn" data-mode="b" onclick="setHistMode('b')">Barevně odlišit roky</button>
+</div>
+<style>
+    .mode-btn {
+        background: var(--panel, #131C2E);
+        color: var(--muted);
+        border: 1px solid #243044;
+        border-radius: 6px;
+        padding: 6px 12px;
+        font: 500 12px 'Inter', sans-serif;
+        cursor: pointer;
+        transition: all .15s;
+    }
+    .mode-btn:hover { border-color: rgba(74,158,255,.4); color: #E8EDF5; }
+    .mode-btn.active { background: rgba(74,158,255,.14); border-color: var(--accent); color: var(--accent); }
+</style>
+{% endif %}
+
 <div class="card">
     <div class="card-title">
         Roky v překryvu · {% if gran == "d" %}den v roce{% else %}týden v roce{% endif %}
-        · aktuální rok zvýrazněn · kliknutím na legendu zapnete/vypnete rok
+        · kliknutím na legendu zapnete/vypnete rok
     </div>
     {% if has_data %}
         <div id="hist-loading" style="display:none; color:var(--muted); font-size:12px; padding:24px 0; text-align:center;">Načítám…</div>
@@ -79,25 +101,56 @@ function histSubmit(form) {
     const currentYear = Math.max(...raw.years.map(y => y.year));
     const unit = precip ? ' mm' : '°C';
 
-    // Locked palette: current year bold accent blue, prior years muted grey.
-    // Default view = current year + previous 5; older years start hidden
-    // (legendonly) and can be toggled back on via the legend.
-    const traces = raw.years.map(yr => {
+    // Mode B palette (distinct color per year, cycled if > 6 years toggled on).
+    const PALETTE_B = ['#4A9EFF', '#2DD4BF', '#FBBF24', '#A78BFA', '#FB7185', '#34D399'];
+
+    // Per-mode line styling for trace i. Returns {color, width, opacity}.
+    //   a = highlight current year (bold blue, others muted grey)
+    //   b = distinct color per year in year order, full opacity, equal weight
+    function styleFor(mode, yr, i) {
+        if (mode === 'b') {
+            return { color: PALETTE_B[i % PALETTE_B.length], width: 2, opacity: 1 };
+        }
         const isCurrent = yr.year === currentYear;
+        return {
+            color: isCurrent ? '#4A9EFF' : '#8A97AD',
+            width: isCurrent ? 2.5 : 1.2,
+            opacity: isCurrent ? 1 : 0.35,
+        };
+    }
+
+    // Default view = current year + previous 5; older years start hidden
+    // (legendonly) and can be toggled back on via the legend — in either mode.
+    const traces = raw.years.map((yr, i) => {
+        const s = styleFor('a', yr, i);
         return {
             x: yr.x,
             y: yr.values,
             type: 'scatter', mode: 'lines', name: String(yr.year),
-            line: {
-                color: isCurrent ? '#4A9EFF' : '#8A97AD',
-                width: isCurrent ? 2.5 : 1.2,
-                shape: daily ? 'linear' : 'spline',
-            },
-            opacity: isCurrent ? 1 : 0.35,
+            line: { color: s.color, width: s.width, shape: daily ? 'linear' : 'spline' },
+            opacity: s.opacity,
             visible: (currentYear - yr.year <= 5) ? true : 'legendonly',
             hovertemplate: '%{y:.1f}' + unit + '<extra>' + yr.year + '</extra>',
         };
     });
+
+    // Restyle existing traces in place — no refetch, no reload. Only touches
+    // color/width/opacity, so the per-year legend on/off state is preserved.
+    window.setHistMode = function (mode) {
+        const colors = [], widths = [], opacities = [];
+        raw.years.forEach((yr, i) => {
+            const s = styleFor(mode, yr, i);
+            colors.push(s.color); widths.push(s.width); opacities.push(s.opacity);
+        });
+        Plotly.restyle('hist-chart', {
+            'line.color': colors,
+            'line.width': widths,
+            'opacity': opacities,
+        });
+        document.querySelectorAll('.mode-btn').forEach(b => {
+            b.classList.toggle('active', b.dataset.mode === mode);
+        });
+    };
 
     const layout = {
         paper_bgcolor: 'transparent',
