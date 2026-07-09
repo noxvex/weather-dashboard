@@ -11,6 +11,11 @@
     --radius:  6px;
     --nav-h:   52px;
     --sidebar-w: 210px;
+
+    /* Sizing pass — bump these to scale spacing app-wide (see body font-size) */
+    --card-pad:    22px;
+    --grid-gap:    1.75rem;
+    --content-pad: 2.25rem;
 }
 
 /* ── Reset & base ─────────────────────────────────────── */
@@ -23,8 +28,11 @@ body {
     background-attachment: fixed;
     color: var(--text);
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
-    font-size: 14.5px;
-    line-height: 1.55;
+    /* Root size bumped 14.5 -> 16px; all rem-based sizing scales with it.
+       The three "keep exactly" elements (headline temp-big, Bod hero-num,
+       account corner) are pinned in px below so they do NOT scale. */
+    font-size: 16px;
+    line-height: 1.6;
     min-height: 100vh;
 }
 
@@ -105,8 +113,9 @@ a:hover { text-decoration: underline; }
     display: flex;
     align-items: center;
     gap: 1rem;
-    padding: 0.9rem 1.5rem;
-    font-size: 0.82rem;
+    padding: 14px 24px;
+    /* Pinned in px (keep-list): must NOT scale with the root font-size bump */
+    font-size: 12px;
     color: var(--muted);
 }
 
@@ -117,7 +126,7 @@ a:hover { text-decoration: underline; }
 .app-main {
     margin-left: var(--sidebar-w);
     max-width: 1180px;
-    padding: 1.75rem 2rem 4rem;
+    padding: 2rem var(--content-pad) 4rem;
 }
 
 @media (max-width: 720px) {
@@ -148,7 +157,7 @@ a:hover { text-decoration: underline; }
 }
 
 .page-sub {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--muted);
     margin-bottom: 18px;
 }
@@ -212,8 +221,8 @@ a:hover { text-decoration: underline; }
     background: linear-gradient(165deg, #17233A 0%, #111B2F 100%);
     border: 1px solid rgba(74,158,255,.10);
     border-radius: 16px;
-    padding: 18px;
-    margin-bottom: 14px;
+    padding: var(--card-pad);
+    margin-bottom: 16px;
     box-shadow: 0 6px 22px rgba(0,0,0,.35);
     transition: transform .18s ease, border-color .18s ease;
 }
@@ -221,9 +230,9 @@ a:hover { text-decoration: underline; }
 .card:hover { transform: translateY(-1px); border-color: rgba(74,158,255,.24); }
 
 .card-title {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
-    margin-bottom: 12px;
+    margin-bottom: 14px;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -311,9 +320,9 @@ a:hover { text-decoration: underline; }
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 9px 0;
+    padding: 10px 0;
     border-bottom: 1px solid rgba(36,48,68,.7);
-    font-size: 13px;
+    font-size: 14px;
 }
 
 .delta-row:last-child { border-bottom: none; }
@@ -359,9 +368,9 @@ a:hover { text-decoration: underline; }
 
 /* filter chips — rounded pill links */
 .chip {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
-    padding: 5px 12px;
+    padding: 6px 13px;
     border-radius: 20px;
     border: 1px solid var(--border);
     color: var(--muted);
@@ -427,7 +436,7 @@ a:hover { text-decoration: underline; }
 .badge-outlook { background: rgba(45,212,191,.12); color: var(--teal); }
 .badge-pinned  { background: rgba(74,158,255,.14); color: var(--accent); }
 
-.note-body { font-size: 13px; line-height: 1.7; color: var(--text); white-space: pre-wrap; }
+.note-body { font-size: 14px; line-height: 1.7; color: var(--text); white-space: pre-wrap; }
 
 .note-actions {
     display: flex;
@@ -511,12 +520,12 @@ a:hover { text-decoration: underline; }
     gap: 12px;
     padding: 11px 0;
     border-bottom: 1px solid rgba(36,48,68,.7);
-    font-size: 13px;
+    font-size: 14px;
 }
 
 .fc-row:last-child { border-bottom: none; }
 
-.fc-day   { width: 80px; color: var(--muted); font-size: 12px; }
+.fc-day   { width: 80px; color: var(--muted); font-size: 13px; }
 .fc-icon  { width: 26px; text-align: center; }
 
 /* Point-list variant of fc-row (reused on the main page for all 22 points) */
@@ -542,7 +551,7 @@ a:hover { text-decoration: underline; }
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 12.5px;
+    font-size: 13.5px;
 }
 
 .fc-track {
@@ -589,8 +598,8 @@ a:hover { text-decoration: underline; }
 /* ── Main dashboard two-column layout ────────────────── */
 .ak-grid {
     display: grid;
-    grid-template-columns: 1fr 320px;
-    gap: 1.5rem;
+    grid-template-columns: 1fr 340px;
+    gap: var(--grid-gap);
     align-items: start;
 }
 
@@ -660,7 +669,8 @@ a:hover { text-decoration: underline; }
 }
 
 .temp-big {
-    font-size: 1.9rem;
+    /* Pinned in px (keep-list): must NOT scale with the root font-size bump */
+    font-size: 28px;
     font-weight: 200;
     color: var(--text);
     line-height: 1;
@@ -763,8 +773,8 @@ a:hover { text-decoration: underline; }
 }
 
 .rev-table td {
-    padding: 8px 12px;
-    font-size: 12px;
+    padding: 9px 12px;
+    font-size: 13px;
     border-bottom: 1px solid rgba(36,48,68,.5);
     color: var(--text);
 }
