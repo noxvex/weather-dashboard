@@ -43,6 +43,9 @@ class Note(models.Model):
     country = models.CharField(max_length=5, choices=COUNTRY_CHOICES, default=COUNTRY_BOTH)
     # Which forecast horizon the note is based on (drives left-border color)
     horizon = models.CharField(max_length=6, choices=HORIZON_CHOICES, default=HORIZON_SHORT)
+    # Soft-delete: set True by prune_notes at 14 days old (unpinned only)
+    # Pinned notes are exempt — is_hidden is never set while is_pinned=True
+    is_hidden = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["-is_pinned", "-created_at"]

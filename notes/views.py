@@ -310,7 +310,7 @@ def _build_filter_chips(notes_qs):
 @login_required
 def aktuality(request):
     autor = request.GET.get("autor", FILTER_ALL)
-    notes_qs = Note.objects.select_related("author").all()
+    notes_qs = Note.objects.select_related("author").filter(is_hidden=False)
     filtered = _apply_filter(notes_qs, autor)
 
     # Paginate the feed (10 per page) so the page never grows unbounded
@@ -589,10 +589,10 @@ def point_detail(request):
             target["dates"].append(r.target_date.isoformat())
             target["temps"].append(round(r.temp_mean, 1))
 
-    # ── System reports for this point's country (expire after 14 days unless pinned) ──
+    # ── System reports for this point's country (hidden notes excluded) ──
     reports = list(
         Note.objects
-        .filter(note_type__startswith="system_")
+        .filter(note_type__startswith="system_", is_hidden=False)
         .filter(Q(country=selected.country.lower()) | Q(country=Note.COUNTRY_BOTH))
         .order_by("-is_pinned", "-created_at")[:8]
     )

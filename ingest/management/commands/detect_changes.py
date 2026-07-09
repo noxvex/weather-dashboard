@@ -9,12 +9,10 @@ Detects:
   - Rain flip: dry→wet or wet→dry transition (precip_sum crossing 1mm threshold)
   - Revision delta: same forecast_date, latest vs previous daily snapshot differ by ≥3°C nationally
 """
-from datetime import date, timedelta
+from datetime import date
 
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
-from django.utils import timezone
-
 from django.db.models import Q
 
 from ingest.models import DailyForecast, WeatherPoint
@@ -122,14 +120,7 @@ class Command(BaseCommand):
     help = "Detect weather change patterns in forecast history and create system_change notes."
 
     def handle(self, *args, **options):
-        # Expiry: system reports vanish after 14 days unless someone pinned them
-        cutoff = timezone.now() - timedelta(days=14)
-        purged, _ = Note.objects.filter(
-            note_type__startswith="system_", is_pinned=False, created_at__lt=cutoff,
-        ).delete()
-        if purged:
-            self.stdout.write(f"Purged {purged} expired unpinned system note(s).")
-
+        # Note lifecycle (soft/hard delete) is now owned by the prune_notes command.
         author = _get_system_user()
         if not author:
             self.stderr.write("No superuser found to author system notes. Run seed_points first.")
