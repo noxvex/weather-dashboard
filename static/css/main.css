@@ -119,8 +119,8 @@ a:hover { text-decoration: underline; }
 
 /* ── Main content area (centered) ─────────────────────── */
 .app-main {
-    max-width: 1180px;
-    margin: 0 auto;
+    /* Full width, left to right — no centering cap */
+    width: 100%;
     padding: 2rem var(--content-pad) 4rem;
 }
 
