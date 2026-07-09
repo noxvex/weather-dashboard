@@ -14,30 +14,33 @@
 <body>
 
 {% if user.is_authenticated %}
-<nav class="nav">
-    <span class="nav-brand">
+{# Fixed left sidebar — always open, primary navigation #}
+<aside class="sidebar">
+    <span class="sidebar-brand">
         <span class="dot"></span>
         Weather CZ/SK
     </span>
 
-    <div class="nav-links">
+    <nav class="sidebar-nav">
         <a href="{% url 'notes:aktuality' %}" {% if request.resolver_match.url_name == 'aktuality' %}class="active"{% endif %}>Aktuality</a>
         <a href="{% url 'bod' %}" {% if request.resolver_match.url_name == 'bod' %}class="active"{% endif %}>Bod</a>
-        <a href="{% url 'notes:revision_tracker' %}" {% if request.resolver_match.url_name == 'revision_tracker' %}class="active"{% endif %}>Revize</a>
         <a href="{% url 'historie' %}" {% if request.resolver_match.url_name == 'historie' %}class="active"{% endif %}>Historie</a>
-    </div>
+        <a href="{% url 'notes:revision_tracker' %}" {% if request.resolver_match.url_name == 'revision_tracker' %}class="active"{% endif %}>Revize</a>
+        {# Room reserved for future sections: Střednědobá, Dlouhodobá, Pyl #}
+    </nav>
+</aside>
 
-    <div class="nav-right">
-        <span>{{ user.username }}</span>
-        <a href="{% url 'accounts:logout' %}">Odhlásit</a>
-        {% if user.is_staff %}
-            <a href="/admin/">Admin</a>
-        {% endif %}
-    </div>
-</nav>
+{# Account corner stays top-right, independent of the sidebar #}
+<div class="account-corner">
+    <span>{{ user.username }}</span>
+    <a href="{% url 'accounts:logout' %}">Odhlásit</a>
+    {% if user.is_staff %}
+        <a href="/admin/">Admin</a>
+    {% endif %}
+</div>
 {% endif %}
 
-<div class="{% if user.is_authenticated %}page-wrap{% endif %}">
+<div class="{% if user.is_authenticated %}app-main{% endif %}">
     {% block content %}{% endblock %}
 </div>
 
