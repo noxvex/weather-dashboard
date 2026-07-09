@@ -15,10 +15,12 @@
 <div class="card chart-card">
     <div class="card-title">Vývoj teploty <span class="hint">ČR + SK národní průměr</span></div>
     <div class="seg">
-        <button class="on" data-mode="short" id="seg-short">Krátkodobá<small>1–16 dní</small></button>
-        <button data-mode="seasonal" id="seg-seasonal"
-                {% if not has_seasonal %}class="soon" title="Data se sbírají"{% endif %}>
-            Střednědobá<small>do 7 měsíců · SEAS5</small>
+        <button class="seg-short on" data-mode="short">Krátkodobá<small>1–16 dní</small></button>
+        <button class="seg-mid{% if not has_mid %} soon" title="Data se sbírají{% endif %}" data-mode="mid">
+            Střednědobá<small>1–4 měsíce · SEAS5</small>
+        </button>
+        <button class="seg-long{% if not has_long %} soon" title="Data se sbírají{% endif %}" data-mode="long">
+            Dlouhodobá<small>4–7 měsíců · SEAS5</small>
         </button>
     </div>
     <div class="chart-wrap">
@@ -87,13 +89,25 @@
             {% endfor %}
         </div>
 
+        {# Composer on top — new note input above the feed #}
+        <div class="card" style="margin-bottom:14px;">
+            <form method="post" action="{% url 'notes:create' %}">
+                {% csrf_token %}
+                <div class="composer" style="margin-top:0;">
+                    <input type="text" name="body" placeholder="Nová poznámka…" required
+                           autocomplete="off">
+                    <button type="submit" class="composer-btn">Přidat</button>
+                </div>
+            </form>
+        </div>
+
         {% if not notes %}
             <div class="feed-empty">Žádné poznámky pro zvolený filtr.</div>
         {% endif %}
 
         {% for note in notes %}
             <div class="note-card
-                {% if note.note_type == 'system_change' or note.note_type == 'system_outlook' %}note--system
+                {% if note.is_system %}note--h-{{ note.horizon }}
                 {% elif note.author.role == 'leader' %}note--leader{% endif %}">
 
                 <div class="note-meta">
@@ -112,6 +126,14 @@
                     {% endif %}
                     <span class="note-dot">·</span>
                     <span class="note-time">{{ note.created_at|date:"j. n. Y, H:i" }}</span>
+                    {# Country chip: CZ / SR / neutral for both #}
+                    {% if note.country == "cz" %}
+                        <span class="note-badge badge-country cz">CZ</span>
+                    {% elif note.country == "sk" %}
+                        <span class="note-badge badge-country sk">SK</span>
+                    {% else %}
+                        <span class="note-badge badge-country">CZ + SK</span>
+                    {% endif %}
                     {% if note.is_pinned %}
                         <span class="note-badge badge-pinned">📌 připnuto</span>
                     {% endif %}
@@ -141,17 +163,6 @@
                 {% endif %}
             </div>
         {% endfor %}
-
-        <div class="card" style="margin-top:4px;">
-            <form method="post" action="{% url 'notes:create' %}">
-                {% csrf_token %}
-                <div class="composer">
-                    <input type="text" name="body" placeholder="Nová poznámka…" required
-                           autocomplete="off">
-                    <button type="submit" class="composer-btn">Přidat</button>
-                </div>
-            </form>
-        </div>
     </div>
 
     {# ════ RIGHT — weather sidebar ════ #}
@@ -269,11 +280,15 @@
 
 {% block extra_js %}
 {{ chart_json|json_script:"chart-data" }}
-{{ seasonal_json|json_script:"seasonal-data" }}
+{{ mid_json|json_script:"mid-data" }}
+{{ long_json|json_script:"long-data" }}
 <script>
 (function () {
-    const shortData = JSON.parse(document.getElementById('chart-data').textContent);
-    const seasonalData = JSON.parse(document.getElementById('seasonal-data').textContent);
+    const datasets = {
+        short: JSON.parse(document.getElementById('chart-data').textContent),
+        mid:   JSON.parse(document.getElementById('mid-data').textContent),
+        long:  JSON.parse(document.getElementById('long-data').textContent),
+    };
 
     const layout = {
         paper_bgcolor: 'transparent',
@@ -333,15 +348,15 @@
     }
 
     // Initial draw = krátkodobá (short-range)
-    draw(shortData);
+    draw(datasets.short);
 
-    // Switcher — actually swaps the data source, not just the label
+    // Switcher — swaps the actual data source (short / mid / long)
     document.querySelectorAll('.seg button[data-mode]').forEach(btn => {
         btn.addEventListener('click', function () {
             if (this.classList.contains('soon')) return;  // no data yet
             document.querySelectorAll('.seg button').forEach(b => b.classList.remove('on'));
             this.classList.add('on');
-            draw(this.dataset.mode === 'seasonal' ? seasonalData : shortData);
+            draw(datasets[this.dataset.mode]);
         });
     });
 }());

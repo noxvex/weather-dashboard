@@ -39,115 +39,106 @@ body {
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
-/* ── Left sidebar nav (fixed, always open) ────────────── */
-.sidebar {
-    position: fixed;
+/* ── Top nav — big clickable tabs ─────────────────────── */
+.nav {
+    position: sticky;
     top: 0;
-    left: 0;
-    bottom: 0;
     z-index: 20;
-    width: var(--sidebar-w);
     display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-    background: rgba(10,14,26,.85);
+    align-items: center;
+    background: rgba(10,14,26,.88);
     backdrop-filter: blur(12px);
-    border-right: 1px solid rgba(74,158,255,.12);
-    padding: 1.5rem 1rem;
+    border-bottom: 1px solid rgba(74,158,255,.14);
+    padding: 0 2rem;
+    height: 64px;
+    gap: 2.5rem;
 }
 
-.sidebar-brand {
+.nav-brand {
     font-weight: 700;
-    font-size: 0.95rem;
+    font-size: 17px;
     color: var(--text);
     letter-spacing: 0.02em;
     display: flex;
     align-items: center;
-    gap: 0.45rem;
+    gap: 0.5rem;
     white-space: nowrap;
-    padding: 0 0.6rem;
 }
 
-.sidebar-brand .dot {
-    width: 8px; height: 8px;
+.nav-brand .dot {
+    width: 9px; height: 9px;
     border-radius: 50%;
     background: var(--accent);
-    box-shadow: 0 0 8px rgba(74,158,255,.6);
+    box-shadow: 0 0 10px rgba(74,158,255,.7);
     display: inline-block;
 }
 
-.sidebar-nav {
+.nav-links {
     display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
+    gap: 0.5rem;
+    flex: 1;
 }
 
-.sidebar-nav a {
+.nav-links a {
     color: var(--muted);
-    padding: 0.55rem 0.8rem;
-    border-radius: var(--radius);
-    font-size: 0.9rem;
-    font-weight: 500;
-    transition: color 0.15s, background 0.15s;
+    padding: 10px 20px;
+    border-radius: 12px;
+    font-size: 15px;
+    font-weight: 600;
+    border: 1px solid transparent;
+    transition: all 0.16s;
 }
 
-.sidebar-nav a:hover,
-.sidebar-nav a.active {
+.nav-links a:hover {
     color: var(--text);
     background: rgba(255,255,255,.06);
+    border-color: rgba(74,158,255,.25);
     text-decoration: none;
 }
 
-.sidebar-nav a.active {
-    background: rgba(74,158,255,.14);
-    color: var(--accent);
-    box-shadow: inset 2px 0 0 var(--accent);
+.nav-links a.active {
+    color: #fff;
+    background: linear-gradient(160deg, rgba(74,158,255,.30), rgba(74,158,255,.12));
+    border-color: rgba(74,158,255,.45);
+    box-shadow: 0 0 16px rgba(74,158,255,.28);
+    text-decoration: none;
 }
 
-/* ── Account corner (fixed top-right) ─────────────────── */
-.account-corner {
-    position: fixed;
-    top: 0;
-    right: 0;
-    z-index: 20;
+/* Account corner — right side of nav (keep-list: pinned, do not scale) */
+.nav-right {
+    margin-left: auto;
     display: flex;
     align-items: center;
     gap: 1rem;
-    padding: 14px 24px;
-    /* Pinned in px (keep-list): must NOT scale with the root font-size bump */
     font-size: 12px;
     color: var(--muted);
 }
 
-.account-corner a { color: var(--muted); }
-.account-corner a:hover { color: var(--text); text-decoration: none; }
+.nav-right a { color: var(--muted); }
+.nav-right a:hover { color: var(--text); text-decoration: none; }
 
-/* ── Main content area (offset by sidebar) ────────────── */
+/* ── Main content area (centered) ─────────────────────── */
 .app-main {
-    margin-left: var(--sidebar-w);
     max-width: 1180px;
+    margin: 0 auto;
     padding: 2rem var(--content-pad) 4rem;
 }
 
 @media (max-width: 720px) {
-    .sidebar {
-        position: static;
-        width: auto;
-        flex-direction: row;
-        align-items: center;
-        bottom: auto;
-        gap: 1rem;
-        border-right: none;
-        border-bottom: 1px solid rgba(74,158,255,.12);
-    }
-    .sidebar-nav { flex-direction: row; flex-wrap: wrap; }
-    .app-main { margin-left: 0; padding: 1.25rem 1rem 3rem; }
-    .account-corner { position: static; margin-left: auto; }
+    .nav { height: auto; flex-wrap: wrap; padding: 0.75rem 1rem; gap: 0.75rem; }
+    .app-main { padding: 1.25rem 1rem 3rem; }
+}
+
+/* ── Horizon color system (graph modes + note borders) ── */
+:root {
+    --h-short: #4A9EFF;   /* krátkodobá — blue  */
+    --h-mid:   #FBBF24;   /* střednědobá — yellow */
+    --h-long:  #34D399;   /* dlouhodobá — green  */
 }
 
 /* ── Eyebrow / page-sub (prototype-style headers) ────── */
 .eyebrow {
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 600;
     letter-spacing: 1.4px;
     text-transform: uppercase;
@@ -239,7 +230,7 @@ a:hover { text-decoration: underline; }
 }
 
 .card-title .hint {
-    font-size: 10.5px;
+    font-size: 12px;
     font-weight: 400;
     color: var(--muted);
 }
@@ -257,29 +248,47 @@ a:hover { text-decoration: underline; }
 .seg button {
     flex: 1;
     background: none;
-    border: none;
+    border: 1px solid transparent;
     border-radius: 8px;
     cursor: pointer;
     color: var(--muted);
     font-family: 'Inter', sans-serif;
-    font-size: 11px;
-    font-weight: 500;
-    padding: 8px 4px;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 12px 8px;
     transition: all .18s;
-    line-height: 1.3;
+    line-height: 1.35;
 }
 
 .seg button small {
     display: block;
-    font-size: 8.5px;
+    font-size: 11px;
     opacity: .7;
     font-weight: 400;
 }
 
-.seg button.on {
-    background: linear-gradient(160deg, rgba(74,158,255,.25), rgba(74,158,255,.10));
+.seg button:hover { color: var(--text); }
+
+/* Per-horizon colors: krátkodobá blue, střednědobá yellow, dlouhodobá green */
+.seg button.seg-short.on {
+    background: linear-gradient(160deg, rgba(74,158,255,.28), rgba(74,158,255,.10));
     color: #fff;
-    box-shadow: 0 0 14px rgba(74,158,255,.25);
+    border-color: rgba(74,158,255,.5);
+    box-shadow: 0 0 16px rgba(74,158,255,.3);
+}
+
+.seg button.seg-mid.on {
+    background: linear-gradient(160deg, rgba(251,191,36,.26), rgba(251,191,36,.08));
+    color: #fff;
+    border-color: rgba(251,191,36,.5);
+    box-shadow: 0 0 16px rgba(251,191,36,.28);
+}
+
+.seg button.seg-long.on {
+    background: linear-gradient(160deg, rgba(52,211,153,.26), rgba(52,211,153,.08));
+    color: #fff;
+    border-color: rgba(52,211,153,.5);
+    box-shadow: 0 0 16px rgba(52,211,153,.28);
 }
 
 .seg button.soon {
@@ -328,7 +337,7 @@ a:hover { text-decoration: underline; }
 .delta-row:last-child { border-bottom: none; }
 
 .d-chip {
-    font-size: 11px;
+    font-size: 12.5px;
     font-weight: 600;
     padding: 3px 10px;
     border-radius: 20px;
@@ -399,9 +408,20 @@ a:hover { text-decoration: underline; }
 
 .note-card:hover { transform: translateX(2px); }
 
-.note-card.note--system {
-    border-left-color: var(--teal);
-    background: linear-gradient(90deg, rgba(45,212,191,.07), rgba(19,28,46,.55) 40%);
+/* Left border color = forecast horizon the note is based on */
+.note-card.note--h-short {
+    border-left-color: var(--h-short);
+    background: linear-gradient(90deg, rgba(74,158,255,.07), rgba(19,28,46,.55) 40%);
+}
+
+.note-card.note--h-mid {
+    border-left-color: var(--h-mid);
+    background: linear-gradient(90deg, rgba(251,191,36,.07), rgba(19,28,46,.55) 40%);
+}
+
+.note-card.note--h-long {
+    border-left-color: var(--h-long);
+    background: linear-gradient(90deg, rgba(52,211,153,.07), rgba(19,28,46,.55) 40%);
 }
 
 .note-card.note--leader {
@@ -417,14 +437,14 @@ a:hover { text-decoration: underline; }
     margin-bottom: 6px;
 }
 
-.note-author { font-size: 11px; font-weight: 700; color: var(--text); }
+.note-author { font-size: 13px; font-weight: 700; color: var(--text); }
 .note-author.is-leader { color: var(--red); }
 .note-author.is-system  { color: var(--teal); }
 .note-dot { color: var(--border); font-size: 10px; }
-.note-time { font-size: 10px; color: var(--muted); }
+.note-time { font-size: 12px; color: var(--muted); }
 
 .note-badge {
-    font-size: 10px;
+    font-size: 11.5px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -432,9 +452,14 @@ a:hover { text-decoration: underline; }
     border-radius: 99px;
 }
 
-.badge-change  { background: rgba(45,212,191,.12); color: var(--teal); }
+.badge-change  { background: rgba(248,113,113,.14); color: var(--red); }
 .badge-outlook { background: rgba(45,212,191,.12); color: var(--teal); }
 .badge-pinned  { background: rgba(74,158,255,.14); color: var(--accent); }
+
+/* Country chips on notes: CZ / SR / both */
+.badge-country { background: rgba(138,151,173,.14); color: var(--muted); }
+.badge-country.cz { background: rgba(74,158,255,.14); color: var(--accent); }
+.badge-country.sk { background: rgba(45,212,191,.12); color: var(--teal); }
 
 .note-body { font-size: 14px; line-height: 1.7; color: var(--text); white-space: pre-wrap; }
 
@@ -479,7 +504,7 @@ a:hover { text-decoration: underline; }
     border-radius: 10px;
     color: var(--text);
     font-family: 'Inter', sans-serif;
-    font-size: 13px;
+    font-size: 14px;
     padding: 11px 14px;
     outline: none;
     transition: border-color .15s;
@@ -584,12 +609,15 @@ a:hover { text-decoration: underline; }
     border-radius: 10px;
     color: var(--text);
     font-family: 'Inter', sans-serif;
-    font-size: 13px;
-    padding: 9px 14px;
+    font-size: 14px;
+    padding: 10px 16px;
     outline: none;
     transition: border-color .15s;
     cursor: pointer;
-    width: 100%;
+    /* Compact — a dropdown must not span the whole page */
+    width: auto;
+    min-width: 220px;
+    max-width: 340px;
     margin-bottom: 14px;
 }
 
@@ -598,9 +626,11 @@ a:hover { text-decoration: underline; }
 /* ── Main dashboard two-column layout ────────────────── */
 .ak-grid {
     display: grid;
-    grid-template-columns: 1fr 340px;
+    /* Feed capped at 620px so notes don't sprawl across the page */
+    grid-template-columns: minmax(0, 620px) 360px;
     gap: var(--grid-gap);
     align-items: start;
+    justify-content: center;
 }
 
 @media (max-width: 860px) {
@@ -627,7 +657,7 @@ a:hover { text-decoration: underline; }
 /* ── Sidebar (weather + panels) ──────────────────────── */
 .ak-sidebar {
     position: sticky;
-    top: 1rem;
+    top: calc(64px + 1rem);  /* below the sticky top nav */
     display: flex;
     flex-direction: column;
     gap: 0;
@@ -704,8 +734,8 @@ a:hover { text-decoration: underline; }
     grid-template-columns: 1fr auto auto;
     align-items: center;
     gap: 0.5rem;
-    padding: 4px 14px;
-    font-size: 12px;
+    padding: 5px 14px;
+    font-size: 13px;
     transition: background 0.12s;
 }
 
@@ -735,7 +765,7 @@ a:hover { text-decoration: underline; }
     border-radius: 8px;
     color: var(--muted);
     font-family: 'Inter', sans-serif;
-    font-size: 11.5px;
+    font-size: 14px;
     font-weight: 500;
     padding: 9px 4px;
     text-decoration: none;

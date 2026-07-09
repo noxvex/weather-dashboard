@@ -175,10 +175,13 @@ def _get_chart_data():
 
 def _get_seasonal_chart_data():
     """
-    Returns {cz: [{date, temp}, ...], sk: [...]} of SEAS5 seasonal mean temp
-    per target_date (national average), from the latest issued snapshot.
-    Feeds the main-page graph's "střednědobá" mode. Empty dict if no data yet.
+    Returns (mid, long) chart dicts of SEAS5 seasonal mean temp per target_date
+    (national average) from the latest issued snapshot:
+      mid  = střednědobá, target_date within 1–4 months from today
+      long = dlouhodobá,  target_date beyond 4 months (to ~7 months)
+    Each is {cz: [{date, temp}, ...], sk: [...]}; empty lists if no data yet.
     """
+    empty = {"cz": [], "sk": []}
     latest = (
         MediumLongRangeForecast.objects
         .filter(horizon=MediumLongRangeForecast.HORIZON_SEAS5)
@@ -187,7 +190,7 @@ def _get_seasonal_chart_data():
         .first()
     )
     if not latest:
-        return {"cz": [], "sk": []}
+        return dict(empty), dict(empty)
 
     rows = list(
         MediumLongRangeForecast.objects
@@ -196,18 +199,27 @@ def _get_seasonal_chart_data():
         .order_by("target_date")
     )
 
-    by_country_date = {"CZ": defaultdict(list), "SK": defaultdict(list)}
+    mid_cutoff = date.today() + timedelta(days=120)  # ~4 months
+    buckets = {
+        "mid": {"CZ": defaultdict(list), "SK": defaultdict(list)},
+        "long": {"CZ": defaultdict(list), "SK": defaultdict(list)},
+    }
     for r in rows:
-        if r.point.country in by_country_date and r.temp_mean is not None:
-            by_country_date[r.point.country][r.target_date.isoformat()].append(r.temp_mean)
+        if r.point.country not in ("CZ", "SK") or r.temp_mean is None:
+            continue
+        key = "mid" if r.target_date <= mid_cutoff else "long"
+        buckets[key][r.point.country][r.target_date.isoformat()].append(r.temp_mean)
 
-    result = {}
-    for country, by_date in by_country_date.items():
-        result[country.lower()] = [
-            {"date": d, "temp": round(sum(vals) / len(vals), 1)}
-            for d, vals in sorted(by_date.items())
-        ]
-    return result
+    def to_chart(by_country):
+        return {
+            country.lower(): [
+                {"date": d, "temp": round(sum(vals) / len(vals), 1)}
+                for d, vals in sorted(by_date.items())
+            ]
+            for country, by_date in by_country.items()
+        }
+
+    return to_chart(buckets["mid"]), to_chart(buckets["long"])
 
 
 def _get_revision_summary(limit=5):
@@ -308,10 +320,11 @@ def aktuality(request):
     # Pre-dumping here double-encodes: JSON.parse in the browser then yields a
     # string instead of an object and the chart silently renders nothing.
     chart_json = _get_chart_data()
-    seasonal_json = _get_seasonal_chart_data()
+    mid_json, long_json = _get_seasonal_chart_data()
     revision_summary = _get_revision_summary()
     has_historical = HistoricalActual.objects.exists()
-    has_seasonal = bool(seasonal_json.get("cz") or seasonal_json.get("sk"))
+    has_mid = bool(mid_json.get("cz") or mid_json.get("sk"))
+    has_long = bool(long_json.get("cz") or long_json.get("sk"))
 
     return render(request, "notes/aktuality.html", {
         "notes": notes,
@@ -326,8 +339,10 @@ def aktuality(request):
         "filter_chips": filter_chips,
         "active_filter": autor,
         "chart_json": chart_json,
-        "seasonal_json": seasonal_json,
-        "has_seasonal": has_seasonal,
+        "mid_json": mid_json,
+        "long_json": long_json,
+        "has_mid": has_mid,
+        "has_long": has_long,
         "revision_summary": revision_summary,
         "has_historical": has_historical,
     })

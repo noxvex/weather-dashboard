@@ -12,6 +12,24 @@ class Note(models.Model):
         (TYPE_SYSTEM_OUTLOOK, "Systém – výhled"),
     ]
 
+    COUNTRY_CZ = "cz"
+    COUNTRY_SK = "sk"
+    COUNTRY_BOTH = "both"
+    COUNTRY_CHOICES = [
+        (COUNTRY_CZ, "ČR"),
+        (COUNTRY_SK, "SR"),
+        (COUNTRY_BOTH, "ČR + SR"),
+    ]
+
+    HORIZON_SHORT = "short"
+    HORIZON_MID = "mid"
+    HORIZON_LONG = "long"
+    HORIZON_CHOICES = [
+        (HORIZON_SHORT, "Krátkodobá"),
+        (HORIZON_MID, "Střednědobá"),
+        (HORIZON_LONG, "Dlouhodobá"),
+    ]
+
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -21,6 +39,10 @@ class Note(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     is_pinned = models.BooleanField(default=False)
     note_type = models.CharField(max_length=20, choices=NOTE_TYPE_CHOICES, default=TYPE_HUMAN)
+    # Which country the note concerns (chip in the feed); human notes default to both
+    country = models.CharField(max_length=5, choices=COUNTRY_CHOICES, default=COUNTRY_BOTH)
+    # Which forecast horizon the note is based on (drives left-border color)
+    horizon = models.CharField(max_length=6, choices=HORIZON_CHOICES, default=HORIZON_SHORT)
 
     class Meta:
         ordering = ["-is_pinned", "-created_at"]

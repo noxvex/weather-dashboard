@@ -115,6 +115,8 @@ class Command(BaseCommand):
                 Note.objects.create(
                     author=author,
                     note_type=Note.TYPE_SYSTEM_OUTLOOK,
+                    country=country.lower(),
+                    horizon=Note.HORIZON_SHORT,
                     body=(
                         f"🌧 Výhled {country_label} — následujících 7 dní: "
                         f"Předpovídáme zvýšenou pravděpodobnost srážek "
@@ -129,6 +131,8 @@ class Command(BaseCommand):
                 Note.objects.create(
                     author=author,
                     note_type=Note.TYPE_SYSTEM_OUTLOOK,
+                    country=country.lower(),
+                    horizon=Note.HORIZON_SHORT,
                     body=(
                         f"☀️ Výhled {country_label} — následujících 7 dní: "
                         f"Očekáváme převážně suché počasí "
@@ -148,6 +152,8 @@ class Command(BaseCommand):
                         Note.objects.create(
                             author=author,
                             note_type=Note.TYPE_SYSTEM_OUTLOOK,
+                            country=country.lower(),
+                            horizon=Note.HORIZON_SHORT,
                             body=(
                                 f"🌡 Výhled {country_label}: Teploty se v příštích dnech blíží "
                                 f"k tropickým hodnotám ({round(t)} °C), ale nepřekračují je. "

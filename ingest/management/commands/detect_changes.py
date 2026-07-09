@@ -50,11 +50,13 @@ def _note_exists_today(country_tag, event_tag):
     ).exists()
 
 
-def _create_note(author, body):
+def _create_note(author, body, country="both"):
     Note.objects.create(
         author=author,
         body=body,
         note_type=Note.TYPE_SYSTEM_CHANGE,
+        country=country,
+        horizon=Note.HORIZON_SHORT,  # change detection runs on short-range data
     )
 
 
@@ -136,8 +138,8 @@ class Command(BaseCommand):
                 if (max(window) - min(window)) >= SWING_THRESHOLD:
                     tag = f"teplotní výkyv_{country}"
                     if not _note_exists_today(country, f"teplotní výkyv"):
-                        _create_note(author,
-                            f"⚠️ {country_label}: Předpověď ukazuje teplotní výkyv "
+                        _create_note(author, country=country.lower(), body=
+                           f"⚠️ {country_label}: Předpověď ukazuje teplotní výkyv "
                             f"{round(max(window) - min(window), 1)} °C v průběhu 7 dnů "
                             f"(od {series[i][0].strftime('%-d. %-m.')} do {series[i+6][0].strftime('%-d. %-m.')})."
                         )
@@ -154,8 +156,8 @@ class Command(BaseCommand):
                         streak_start = fd
                     if streak >= HEATWAVE_DAYS:
                         if not _note_exists_today(country, "tropické dny"):
-                            _create_note(author,
-                                f"🌡 {country_label}: Předpovídány tropické dny (≥{HEATWAVE_TEMP:.0f} °C) "
+                            _create_note(author, country=country.lower(), body=
+                               f"🌡 {country_label}: Předpovídány tropické dny (≥{HEATWAVE_TEMP:.0f} °C) "
                                 f"od {streak_start.strftime('%-d. %-m.')} — "
                                 f"zatím {streak} po sobě jdoucích dnů."
                             )
@@ -173,8 +175,8 @@ class Command(BaseCommand):
                     fd = series[i][0]
                     direction = "sucho → déšť" if curr_wet else "déšť → sucho"
                     if not _note_exists_today(country, "přechod srážek"):
-                        _create_note(author,
-                            f"🌧 {country_label}: Předpověď naznačuje přechod srážek "
+                        _create_note(author, country=country.lower(), body=
+                           f"🌧 {country_label}: Předpověď naznačuje přechod srážek "
                             f"({direction}) kolem {fd.strftime('%-d. %-m.')}."
                         )
                         notes_created += 1
@@ -191,8 +193,8 @@ class Command(BaseCommand):
                         if delta >= REVISION_THRESHOLD:
                             direction = "vyšší" if curr_t > prev_t else "nižší"
                             if not _note_exists_today(country, "revize předpovědi"):
-                                _create_note(author,
-                                    f"🔄 {country_label}: Revize předpovědi pro "
+                                _create_note(author, country=country.lower(), body=
+                                   f"🔄 {country_label}: Revize předpovědi pro "
                                     f"{fd.strftime('%-d. %-m.')} — teplota o {delta:.1f} °C {direction} "
                                     f"než předchozí verze ({prev_t:.1f} → {curr_t:.1f} °C)."
                                 )
