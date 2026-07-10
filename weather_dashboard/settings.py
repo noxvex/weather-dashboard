@@ -33,6 +33,9 @@ AUTH_USER_MODEL = "accounts.CustomUser"
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # WhiteNoise must be immediately after SecurityMiddleware to serve compressed
+    # static files in production without going through Django's view layer.
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -117,3 +120,34 @@ EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "weather@dashboard.local")
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@example.com")
+
+# ── Production security ───────────────────────────────────────────────────────
+
+# Railway is a TLS-terminating proxy: it forwards the original scheme in this
+# header so Django knows the request arrived over HTTPS, not HTTP.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# Only send session and CSRF cookies over HTTPS (safe since Railway is HTTPS-only).
+# Never enable SECURE_SSL_REDIRECT here — Railway's proxy already handles it and
+# Django redirecting on top would create a redirect loop.
+SESSION_COOKIE_SECURE = not DEBUG  # False in local dev, True in production
+CSRF_COOKIE_SECURE = not DEBUG
+
+# CSRF protection for HTTPS — without this every form POST in production gets a
+# 403. Add a custom domain later via CSRF_TRUSTED_ORIGINS_EXTRA env var (comma-
+# separated list of https:// URLs, e.g. "https://yoursite.cz").
+CSRF_TRUSTED_ORIGINS = ["https://*.railway.app"]
+_csrf_extra = os.environ.get("CSRF_TRUSTED_ORIGINS_EXTRA", "")
+if _csrf_extra:
+    CSRF_TRUSTED_ORIGINS += [o.strip() for o in _csrf_extra.split(",") if o.strip()]
+
+# ── Static files — WhiteNoise for production ─────────────────────────────────
+
+# CompressedManifestStaticFilesStorage: gzips files + appends content-hash to
+# filenames so browsers cache forever. Requires `collectstatic` before start.
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}

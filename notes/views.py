@@ -35,44 +35,43 @@ def _avg(rows, field):
     return round(sum(vals) / len(vals), 1) if vals else None
 
 
-def _get_weather_panel():
-    today = date.today()
-    nearest_date = (
+def _get_latest_short_rows():
+    """
+    All DailyForecast rows for the most recent short-range batch, with point
+    pre-joined. Two queries total — callers share this result rather than each
+    independently finding the latest batch (was 5 separate queries before).
+    """
+    latest = (
         DailyForecast.objects
-        .filter(horizon=DailyForecast.HORIZON_SHORT, forecast_date__gte=today)
-        .order_by("forecast_date")
-        .values_list("forecast_date", flat=True)
-        .first()
-    )
-    if nearest_date is None:
-        return None, None, None, [], []
-
-    # For weather display use the latest issued snapshot for this date
-    latest_issued = (
-        DailyForecast.objects
-        .filter(forecast_date=nearest_date, horizon=DailyForecast.HORIZON_SHORT)
-        .order_by("-issued_at", "-fetched_at")
+        .filter(horizon=DailyForecast.HORIZON_SHORT, issued_at__isnull=False)
+        .order_by("-issued_at")
         .values_list("issued_at", flat=True)
         .first()
     )
-
-    rows = list(
+    if not latest:
+        return []
+    return list(
         DailyForecast.objects
-        .filter(forecast_date=nearest_date, horizon=DailyForecast.HORIZON_SHORT, issued_at=latest_issued)
+        .filter(horizon=DailyForecast.HORIZON_SHORT, issued_at=latest)
         .select_related("point")
-        .order_by("point__name")
+        .order_by("point__name", "forecast_date")
     )
-    # Fall back to fetched_at ordering if issued_at is null (pre-Phase-4 data)
-    if not rows:
-        rows = list(
-            DailyForecast.objects
-            .filter(forecast_date=nearest_date, horizon=DailyForecast.HORIZON_SHORT)
-            .select_related("point")
-            .order_by("point__name")
-        )
 
-    cz = [r for r in rows if r.point.country == "CZ"]
-    sk = [r for r in rows if r.point.country == "SK"]
+
+def _get_weather_panel(batch_rows):
+    """Sidebar data derived from pre-fetched batch rows — zero extra queries."""
+    if not batch_rows:
+        return None, None, None, [], []
+
+    today = date.today()
+    future_dates = sorted({r.forecast_date for r in batch_rows if r.forecast_date >= today})
+    if not future_dates:
+        return None, None, None, [], []
+    nearest_date = future_dates[0]
+
+    day_rows = [r for r in batch_rows if r.forecast_date == nearest_date]
+    cz = [r for r in day_rows if r.point.country == "CZ"]
+    sk = [r for r in day_rows if r.point.country == "SK"]
 
     cz_avg = {"temperature_max": _avg(cz, "temperature_max"), "temperature_min": _avg(cz, "temperature_min"), "precipitation_sum": _avg(cz, "precipitation_sum")}
     sk_avg = {"temperature_max": _avg(sk, "temperature_max"), "temperature_min": _avg(sk, "temperature_min"), "precipitation_sum": _avg(sk, "precipitation_sum")}
@@ -138,30 +137,10 @@ def _get_since_login(last_login):
 
 # ── Chart data (16-day national averages for Plotly) ───────────────────────
 
-def _get_chart_data():
-    """
-    Returns {cz: [{date, temp}, ...], sk: [...]} for the latest issued snapshot.
-    Used by the main dashboard Plotly chart.
-    """
-    latest = (
-        DailyForecast.objects
-        .filter(horizon=DailyForecast.HORIZON_SHORT, issued_at__isnull=False)
-        .order_by("-issued_at")
-        .values_list("issued_at__date", flat=True)
-        .first()
-    )
-    if not latest:
-        return {"cz": [], "sk": []}
-
-    rows = list(
-        DailyForecast.objects
-        .filter(horizon=DailyForecast.HORIZON_SHORT, issued_at__date=latest)
-        .select_related("point")
-        .order_by("forecast_date")
-    )
-
+def _get_chart_data(batch_rows):
+    """16-day national avg series derived from pre-fetched batch rows — zero extra queries."""
     by_country_date = {"CZ": defaultdict(list), "SK": defaultdict(list)}
-    for r in rows:
+    for r in batch_rows:
         if r.point.country in by_country_date and r.temperature_max is not None:
             by_country_date[r.point.country][r.forecast_date.isoformat()].append(r.temperature_max)
 
@@ -320,13 +299,16 @@ def aktuality(request):
     for note in notes:
         note.user_can_modify = _can_modify(request.user, note)
 
-    forecast_date, cz_avg, sk_avg, cz_points, sk_points = _get_weather_panel()
+    # Fetch all DailyForecast rows for the latest batch once; both the sidebar
+    # weather panel and the Plotly chart share this result (was 5 queries, now 2).
+    batch_rows = _get_latest_short_rows()
+    forecast_date, cz_avg, sk_avg, cz_points, sk_points = _get_weather_panel(batch_rows)
     since_login = _get_since_login(request.user.last_login)
     filter_chips = _build_filter_chips(notes_qs)
     # Pass the raw dict — the json_script template filter handles serialization.
     # Pre-dumping here double-encodes: JSON.parse in the browser then yields a
     # string instead of an object and the chart silently renders nothing.
-    chart_json = _get_chart_data()
+    chart_json = _get_chart_data(batch_rows)
     mid_json, long_json = _get_seasonal_chart_data()
     revision_summary = _get_revision_summary()
     has_historical = HistoricalActual.objects.exists()

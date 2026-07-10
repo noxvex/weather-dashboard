@@ -5,3 +5,5 @@ dj-database-url>=2.3
 requests>=2.32
 pandas>=2.2
 openpyxl>=3.1
+gunicorn>=22.0
+whitenoise>=6.7

@@ -21,21 +21,36 @@
         Weather CZ/SK
     </span>
 
-    <div class="nav-links">
+    <div class="nav-links" id="nav-links">
         <a href="{% url 'notes:aktuality' %}" {% if request.resolver_match.url_name == 'aktuality' %}class="active"{% endif %}>Aktuality</a>
         <a href="{% url 'bod' %}" {% if request.resolver_match.url_name == 'bod' %}class="active"{% endif %}>Bod</a>
         <a href="{% url 'historie' %}" {% if request.resolver_match.url_name == 'historie' %}class="active"{% endif %}>Historie</a>
         <a href="{% url 'notes:revision_tracker' %}" {% if request.resolver_match.url_name == 'revision_tracker' %}class="active"{% endif %}>Revize</a>
     </div>
 
-    <div class="nav-right">
+    <div class="nav-right" id="nav-right">
         <span>{{ user.username }}</span>
         <a href="{% url 'accounts:logout' %}">Odhlásit</a>
         {% if user.is_staff %}
             <a href="/admin/">Admin</a>
         {% endif %}
     </div>
+
+    <button class="nav-hamburger" id="nav-hamburger" aria-label="Otevřít menu">
+        <span></span><span></span><span></span>
+    </button>
 </nav>
+<script>
+(function(){
+    var btn = document.getElementById('nav-hamburger');
+    if (!btn) return;
+    btn.addEventListener('click', function(){
+        this.classList.toggle('open');
+        document.getElementById('nav-links').classList.toggle('open');
+        document.getElementById('nav-right').classList.toggle('open');
+    });
+}());
+</script>
 {% endif %}
 
 <div class="{% if user.is_authenticated %}app-main{% endif %}">
