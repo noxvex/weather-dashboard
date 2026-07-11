@@ -350,6 +350,12 @@ a:hover { text-decoration: underline; }
 .d-chip-down { background: rgba(45,212,191,.20);  color: var(--teal); }
 .d-chip-flat { background: rgba(138,151,173,.12); color: var(--muted); }
 
+/* Direction arrows on the delta chips: up = warmer (red), down = cooler (teal).
+   Rendered via ::before so every .d-chip-up/-down (Bod detail, Aktuality feed)
+   gets a consistent glyph without touching each template. */
+.d-chip-up::before   { content: '▲'; margin-right: 5px; font-size: .82em; }
+.d-chip-down::before { content: '▼'; margin-right: 5px; font-size: .82em; }
+
 /* ── Revision bar ─────────────────────────────────────── */
 .rev-bar {
     height: 5px;
