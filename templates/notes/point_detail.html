@@ -92,6 +92,7 @@
                 {% else %}
                     <span class="note-badge badge-outlook">výhled</span>
                 {% endif %}
+                <span class="note-badge badge-h-{{ r.horizon }}">{{ r.get_horizon_display }}</span>
                 {% if r.country == "cz" %}<span class="note-badge badge-country cz">CZ</span>
                 {% elif r.country == "sk" %}<span class="note-badge badge-country sk">SK</span>
                 {% else %}<span class="note-badge badge-country">CZ + SK</span>{% endif %}
@@ -167,7 +168,8 @@
         mid:   JSON.parse(document.getElementById('point-mid-data').textContent),
         long:  JSON.parse(document.getElementById('point-long-data').textContent),
     };
-    const modeColors = { short: '#4A9EFF', mid: '#FBBF24', long: '#34D399' };
+    // Keep in sync with --h-short / --h-mid / --h-long in main.css
+    const modeColors = { short: '#4A9EFF', mid: '#FBBF24', long: '#F472B6' };
     if (!datasets.short.dates || !datasets.short.dates.length) return;
 
     function buildTraces(mode) {

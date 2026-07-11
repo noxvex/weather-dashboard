@@ -131,6 +131,7 @@
                         {% elif note.note_type == "system_outlook" %}
                             <span class="note-badge badge-outlook">výhled</span>
                         {% endif %}
+                        <span class="note-badge badge-h-{{ note.horizon }}">{{ note.get_horizon_display }}</span>
                     {% elif note.author.role == "admin" %}
                         <span class="note-author is-admin">{{ note.author.username }}</span>
                     {% elif note.author.role == "leader" %}

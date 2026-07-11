@@ -133,7 +133,7 @@ a:hover { text-decoration: underline; }
 :root {
     --h-short: #4A9EFF;   /* krátkodobá — blue  */
     --h-mid:   #FBBF24;   /* střednědobá — yellow */
-    --h-long:  #34D399;   /* dlouhodobá — green  */
+    --h-long:  #F472B6;   /* dlouhodobá — pink (was #34D399 green, too close to --teal) */
 }
 
 /* ── Eyebrow / page-sub (prototype-style headers) ────── */
@@ -285,10 +285,12 @@ a:hover { text-decoration: underline; }
 }
 
 .seg button.seg-long.on {
-    background: linear-gradient(160deg, rgba(52,211,153,.26), rgba(52,211,153,.08));
+    background: linear-gradient(160deg,
+        color-mix(in srgb, var(--h-long) 26%, transparent),
+        color-mix(in srgb, var(--h-long) 8%, transparent));
     color: #fff;
-    border-color: rgba(52,211,153,.5);
-    box-shadow: 0 0 16px rgba(52,211,153,.28);
+    border-color: color-mix(in srgb, var(--h-long) 50%, transparent);
+    box-shadow: 0 0 16px color-mix(in srgb, var(--h-long) 28%, transparent);
 }
 
 .seg button.soon {
@@ -344,8 +346,8 @@ a:hover { text-decoration: underline; }
     white-space: nowrap;
 }
 
-.d-chip-up   { background: rgba(248,113,113,.14); color: var(--red); }
-.d-chip-down { background: rgba(45,212,191,.14);  color: var(--teal); }
+.d-chip-up   { background: rgba(248,113,113,.20); color: var(--red); }
+.d-chip-down { background: rgba(45,212,191,.20);  color: var(--teal); }
 .d-chip-flat { background: rgba(138,151,173,.12); color: var(--muted); }
 
 /* ── Revision bar ─────────────────────────────────────── */
@@ -411,17 +413,20 @@ a:hover { text-decoration: underline; }
 /* Left border color = forecast horizon the note is based on */
 .note-card.note--h-short {
     border-left-color: var(--h-short);
-    background: linear-gradient(90deg, rgba(74,158,255,.07), rgba(19,28,46,.55) 40%);
+    border-left-width: 4px;
+    background: linear-gradient(90deg, rgba(74,158,255,.14), rgba(19,28,46,.55) 40%);
 }
 
 .note-card.note--h-mid {
     border-left-color: var(--h-mid);
-    background: linear-gradient(90deg, rgba(251,191,36,.07), rgba(19,28,46,.55) 40%);
+    border-left-width: 4px;
+    background: linear-gradient(90deg, rgba(251,191,36,.14), rgba(19,28,46,.55) 40%);
 }
 
 .note-card.note--h-long {
     border-left-color: var(--h-long);
-    background: linear-gradient(90deg, rgba(52,211,153,.07), rgba(19,28,46,.55) 40%);
+    border-left-width: 4px;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--h-long) 14%, transparent), rgba(19,28,46,.55) 40%);
 }
 
 .note-card.note--leader {
@@ -461,6 +466,12 @@ a:hover { text-decoration: underline; }
 .badge-change  { background: rgba(248,113,113,.14); color: var(--red); }
 .badge-outlook { background: rgba(45,212,191,.12); color: var(--teal); }
 .badge-pinned  { background: rgba(74,158,255,.14); color: var(--accent); }
+
+/* Horizon label badges — same pattern as badge-change/-outlook,
+   background + text color both derived from the horizon variable */
+.badge-h-short { background: rgba(74,158,255,.20); color: var(--h-short); }
+.badge-h-mid   { background: rgba(251,191,36,.20); color: var(--h-mid); }
+.badge-h-long  { background: color-mix(in srgb, var(--h-long) 22%, transparent); color: var(--h-long); }
 
 /* Country chips on notes: CZ / SR / both */
 .badge-country { background: rgba(138,151,173,.16); color: var(--muted); border: 1px solid rgba(138,151,173,.3); }
@@ -990,9 +1001,12 @@ hr { border: none; border-top: 1px solid var(--border); margin: 1.25rem 0; }
     box-shadow: 0 0 16px rgba(251,191,36,.28);
 }
 .seg a.seg-long.on {
-    background: linear-gradient(160deg, rgba(52,211,153,.26), rgba(52,211,153,.08));
-    color: #fff; border-color: rgba(52,211,153,.5);
-    box-shadow: 0 0 16px rgba(52,211,153,.28);
+    background: linear-gradient(160deg,
+        color-mix(in srgb, var(--h-long) 26%, transparent),
+        color-mix(in srgb, var(--h-long) 8%, transparent));
+    color: #fff;
+    border-color: color-mix(in srgb, var(--h-long) 50%, transparent);
+    box-shadow: 0 0 16px color-mix(in srgb, var(--h-long) 28%, transparent);
 }
 .seg a.seg-full.on {
     background: linear-gradient(160deg, rgba(232,237,245,.18), rgba(232,237,245,.06));
@@ -1090,9 +1104,9 @@ hr { border: none; border-top: 1px solid var(--border); margin: 1.25rem 0; }
     padding: 10px 13px;
     margin-bottom: 8px;
 }
-.report-row.note--h-short { border-left-color: var(--h-short); }
-.report-row.note--h-mid   { border-left-color: var(--h-mid); }
-.report-row.note--h-long  { border-left-color: var(--h-long); }
+.report-row.note--h-short { border-left-color: var(--h-short); border-left-width: 4px; }
+.report-row.note--h-mid   { border-left-color: var(--h-mid);   border-left-width: 4px; }
+.report-row.note--h-long  { border-left-color: var(--h-long);  border-left-width: 4px; }
 
 .report-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 5px; }
 .report-body { font-size: 13.5px; line-height: 1.6; color: var(--text); }

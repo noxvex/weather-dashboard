@@ -142,7 +142,8 @@ function histSubmit(form) {
 
     if (raw.mode === 'span') {
         // Recent actuals — simple date series colored by the horizon
-        const spanColors = { kratka: '#4A9EFF', stredni: '#FBBF24', dlouha: '#34D399' };
+        // Keep in sync with --h-short / --h-mid / --h-long in main.css
+        const spanColors = { kratka: '#4A9EFF', stredni: '#FBBF24', dlouha: '#F472B6' };
         const c = spanColors[raw.rozsah] || '#4A9EFF';
         const layout = Object.assign({}, baseLayout, {
             xaxis: {
