@@ -69,9 +69,9 @@
                                 <td>
                                     {% if r.temp_delta is not None %}
                                         {% if r.temp_delta > 0 %}
-                                            <span class="delta-pos">+{{ r.temp_delta }}&thinsp;°C</span>
+                                            <span class="delta-pos">+{{ r.temp_delta }}&thinsp;°C{% if r.temp_pct %}<br><small>(+{{ r.temp_pct }}&thinsp;%)</small>{% endif %}</span>
                                         {% elif r.temp_delta < 0 %}
-                                            <span class="delta-neg">{{ r.temp_delta }}&thinsp;°C</span>
+                                            <span class="delta-neg">{{ r.temp_delta }}&thinsp;°C{% if r.temp_pct %}<br><small>({{ r.temp_pct }}&thinsp;%)</small>{% endif %}</span>
                                         {% else %}
                                             <span class="delta-zero">0&thinsp;°C</span>
                                         {% endif %}

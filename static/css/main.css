@@ -403,6 +403,31 @@ a:hover { text-decoration: underline; }
     color: #fff;
 }
 
+/* Colored active states for horizon and country filter chips */
+.chip.chip-h-short.active { background: rgba(74,158,255,.18); border-color: rgba(74,158,255,.5); color: var(--h-short); }
+.chip.chip-h-mid.active   { background: rgba(251,191,36,.18); border-color: rgba(251,191,36,.5); color: var(--h-mid); }
+.chip.chip-h-long.active  { background: color-mix(in srgb, var(--h-long) 18%, transparent); border-color: color-mix(in srgb, var(--h-long) 50%, transparent); color: var(--h-long); }
+.chip.chip-cz.active      { background: rgba(74,158,255,.18); border-color: rgba(74,158,255,.5); color: var(--accent); }
+.chip.chip-sk.active      { background: rgba(45,212,191,.16); border-color: rgba(45,212,191,.4); color: var(--teal); }
+
+/* Filter bar layout: rows of groups */
+.filter-bar { flex-direction: column; gap: 0.55rem; }
+.filter-group {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+}
+.filter-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--muted);
+    white-space: nowrap;
+    min-width: 60px;
+}
+
 /* note cards */
 .note-card {
     border-radius: 12px;

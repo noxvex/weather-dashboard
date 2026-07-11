@@ -1,0 +1,42 @@
+{# Report filter bar for Bod / national detail pages.
+   Expects: r_rozsah, r_horizont, r_zeme from view context.
+   Preserves ?bod=, ?land= and other params via hidden inputs. #}
+<form id="report-filters" method="get" style="display:none;">
+    {% if request.GET.bod %}<input type="hidden" name="bod" value="{{ request.GET.bod }}">{% endif %}
+    {% if request.GET.land %}<input type="hidden" name="land" value="{{ request.GET.land }}">{% endif %}
+    <input type="hidden" name="r_rozsah"   id="rf-rozsah"   value="{{ r_rozsah }}">
+    <input type="hidden" name="r_horizont" id="rf-horizont" value="{{ r_horizont }}">
+    <input type="hidden" name="r_zeme"     id="rf-zeme"     value="{{ r_zeme }}">
+</form>
+
+<div class="filter-bar" style="margin-bottom:10px; margin-top:4px;">
+    <div class="filter-group">
+        <span class="filter-label">Čas</span>
+        <button type="button" class="chip {% if r_rozsah == '24h' %}active{% endif %}"         onclick="setRF('r_rozsah','24h')">24h</button>
+        <button type="button" class="chip {% if r_rozsah == '7d' or not r_rozsah %}active{% endif %}" onclick="setRF('r_rozsah','7d')">7 dní</button>
+        <button type="button" class="chip {% if r_rozsah == '30d' %}active{% endif %}"         onclick="setRF('r_rozsah','30d')">30 dní</button>
+        <button type="button" class="chip {% if r_rozsah == 'vse' %}active{% endif %}"         onclick="setRF('r_rozsah','vse')">Vše</button>
+    </div>
+    <div class="filter-group">
+        <span class="filter-label">Horizont</span>
+        <button type="button" class="chip {% if not r_horizont %}active{% endif %}"                       onclick="setRF('r_horizont','')">Kr.+Střed.</button>
+        <button type="button" class="chip chip-h-short {% if r_horizont == 'short' %}active{% endif %}"  onclick="setRF('r_horizont','short')">Krátkodobá</button>
+        <button type="button" class="chip chip-h-mid   {% if r_horizont == 'mid'   %}active{% endif %}"  onclick="setRF('r_horizont','mid')">Střednědobá</button>
+        <button type="button" class="chip chip-h-long  {% if r_horizont == 'long'  %}active{% endif %}"  onclick="setRF('r_horizont','long')">Dlouhodobá</button>
+        <button type="button" class="chip {% if r_horizont == 'vse' %}active{% endif %}"                  onclick="setRF('r_horizont','vse')">Vše</button>
+    </div>
+    <div class="filter-group">
+        <span class="filter-label">Země</span>
+        <button type="button" class="chip {% if not r_zeme %}active{% endif %}"               onclick="setRF('r_zeme','')">Obě</button>
+        <button type="button" class="chip chip-cz {% if r_zeme == 'cz' %}active{% endif %}"  onclick="setRF('r_zeme','cz')">ČR</button>
+        <button type="button" class="chip chip-sk {% if r_zeme == 'sk' %}active{% endif %}"  onclick="setRF('r_zeme','sk')">SR</button>
+    </div>
+</div>
+
+<script>
+function setRF(param, value) {
+    const idMap = { r_rozsah: 'rf-rozsah', r_horizont: 'rf-horizont', r_zeme: 'rf-zeme' };
+    document.getElementById(idMap[param]).value = value;
+    document.getElementById('report-filters').submit();
+}
+</script>

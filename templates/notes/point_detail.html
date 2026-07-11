@@ -116,6 +116,7 @@
 {# System reports still useful at national level #}
 <div class="card">
     <div class="card-title">Co očekávat <span class="hint">systémové reporty pro {{ nat_country }}</span></div>
+    {% include "notes/_report_filters.html" %}
     {% if reports %}
         {% for r in reports %}
         <div class="report-row note--h-{{ r.horizon }}">
@@ -199,6 +200,7 @@
 {# ── System reports for this point's country ── #}
 <div class="card">
     <div class="card-title">Co očekávat <span class="hint">systémové reporty · mizí po 14 dnech, pokud nejsou připnuté</span></div>
+    {% include "notes/_report_filters.html" %}
     {% if reports %}
         {% for r in reports %}
         <div class="report-row note--h-{{ r.horizon }}">
@@ -249,9 +251,9 @@
         <div class="delta-row">
             <span>{{ r.date|day_cs }}, {{ r.date|date:"j. n." }}</span>
             {% if r.delta > 0 %}
-                <span class="d-chip d-chip-up">+{{ r.delta }} °C od předchozího</span>
+                <span class="d-chip d-chip-up">+{{ r.delta }}&thinsp;°C{% if r.pct %} (+{{ r.pct }}&thinsp;%){% endif %}</span>
             {% else %}
-                <span class="d-chip d-chip-down">{{ r.delta }} °C od předchozího</span>
+                <span class="d-chip d-chip-down">{{ r.delta }}&thinsp;°C{% if r.pct %} ({{ r.pct }}&thinsp;%){% endif %}</span>
             {% endif %}
         </div>
         {% endfor %}

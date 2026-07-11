@@ -1,5 +1,8 @@
 from collections import defaultdict
 from datetime import date, timedelta
+import urllib.parse
+
+from django.utils import timezone
 
 from django.db.models import Avg, Count, ExpressionWrapper, F, FloatField, Func, IntegerField, Sum
 from django.db.models.functions import ExtractIsoYear, ExtractWeek, ExtractYear
@@ -33,6 +36,13 @@ def _can_pin(user):
 def _avg(rows, field):
     vals = [getattr(r, field) for r in rows if getattr(r, field) is not None]
     return round(sum(vals) / len(vals), 1) if vals else None
+
+
+def _temp_pct(delta, prev):
+    """% change relative to |prev|; None when base too small to be meaningful."""
+    if prev is None or delta is None or abs(prev) < 3:
+        return None
+    return round(delta / abs(prev) * 100)
 
 
 def _get_latest_short_rows():
@@ -284,13 +294,59 @@ def _build_filter_chips(notes_qs):
     return chips
 
 
+# ── Feed filter helpers ──────────────────────────────────────────────────────
+
+def _apply_time_filter(qs, rozsah):
+    """Pinned notes are always shown regardless of time window."""
+    deltas = {"24h": timedelta(hours=24), "7d": timedelta(days=7), "30d": timedelta(days=30)}
+    if rozsah not in deltas:  # "vse" or unrecognised
+        return qs
+    since = timezone.now() - deltas[rozsah]
+    return qs.filter(Q(is_pinned=True) | Q(created_at__gte=since))
+
+
+def _apply_horizon_filter(qs, horizont):
+    """Default (empty string) = short+mid; 'vse' = all three."""
+    if horizont == Note.HORIZON_SHORT:
+        return qs.filter(horizon=Note.HORIZON_SHORT)
+    if horizont == Note.HORIZON_MID:
+        return qs.filter(horizon=Note.HORIZON_MID)
+    if horizont == Note.HORIZON_LONG:
+        return qs.filter(horizon=Note.HORIZON_LONG)
+    if horizont == "vse":
+        return qs
+    # default: short + mid (long-range notes hidden until explicitly requested)
+    return qs.filter(horizon__in=[Note.HORIZON_SHORT, Note.HORIZON_MID])
+
+
+def _apply_country_filter(qs, zeme):
+    """Notes tagged 'both' always pass through any country filter."""
+    if zeme == Note.COUNTRY_CZ:
+        return qs.filter(country__in=[Note.COUNTRY_CZ, Note.COUNTRY_BOTH])
+    if zeme == Note.COUNTRY_SK:
+        return qs.filter(country__in=[Note.COUNTRY_SK, Note.COUNTRY_BOTH])
+    return qs  # "both" or unrecognised: no filter
+
+
+def _filter_qs_string(**kwargs):
+    """Build a URL query string from non-empty filter params (for pagination links)."""
+    return urllib.parse.urlencode({k: v for k, v in kwargs.items() if v})
+
+
 # ── Views ────────────────────────────────────────────────────────────────────
 
 @login_required
 def aktuality(request):
     autor = request.GET.get("autor", FILTER_ALL)
+    rozsah = request.GET.get("rozsah", "7d")     # 24h / 7d / 30d / vse
+    horizont = request.GET.get("horizont", "")   # "" = short+mid (default), short/mid/long/vse
+    zeme = request.GET.get("zeme", "")           # "" = both, cz, sk
+
     notes_qs = Note.objects.select_related("author").filter(is_hidden=False)
     filtered = _apply_filter(notes_qs, autor)
+    filtered = _apply_time_filter(filtered, rozsah)
+    filtered = _apply_horizon_filter(filtered, horizont)
+    filtered = _apply_country_filter(filtered, zeme)
 
     # Paginate the feed (10 per page) so the page never grows unbounded
     paginator = Paginator(filtered, 10)
@@ -315,6 +371,9 @@ def aktuality(request):
     has_mid = bool(mid_json.get("cz") or mid_json.get("sk"))
     has_long = bool(long_json.get("cz") or long_json.get("sk"))
 
+    # Query string for pagination links (all active filters, no strana)
+    pagination_qs = _filter_qs_string(autor=autor, rozsah=rozsah, horizont=horizont, zeme=zeme)
+
     return render(request, "notes/aktuality.html", {
         "notes": notes,
         "user_can_pin": _can_pin(request.user),
@@ -327,6 +386,10 @@ def aktuality(request):
         "since_login": since_login,
         "filter_chips": filter_chips,
         "active_filter": autor,
+        "active_rozsah": rozsah,
+        "active_horizont": horizont,
+        "active_zeme": zeme,
+        "pagination_qs": pagination_qs,
         "chart_json": chart_json,
         "mid_json": mid_json,
         "long_json": long_json,
@@ -448,6 +511,7 @@ def revision_tracker(request):
                             "temp_latest": lt,
                             "temp_prev": pt,
                             "temp_delta": temp_delta,
+                            "temp_pct": _temp_pct(temp_delta, pt),
                             "precip_delta": precip_delta,
                         })
 
@@ -481,6 +545,17 @@ def point_detail(request):
     cz_pts = sorted([p for p in points if p.country == "CZ"], key=lambda p: p.name)
     sk_pts = sorted([p for p in points if p.country == "SK"], key=lambda p: p.name)
 
+    # ── Report filters (r_ prefix avoids collision with bod/land params) ──
+    r_rozsah = request.GET.get("r_rozsah", "7d")
+    r_horizont = request.GET.get("r_horizont", "")
+    r_zeme = request.GET.get("r_zeme", "")
+
+    def _filter_reports(base_qs):
+        qs = _apply_time_filter(base_qs, r_rozsah)
+        qs = _apply_horizon_filter(qs, r_horizont)
+        qs = _apply_country_filter(qs, r_zeme)
+        return list(qs.order_by("-is_pinned", "-created_at")[:12])
+
     # ── Determine selection: ?land=cz/sk → national view; ?bod=pk → city ──
     land = request.GET.get("land", "").lower()
     selected_land = land if land in ("cz", "sk") else None
@@ -489,12 +564,10 @@ def point_detail(request):
     if selected_land:
         nat_avg = cz_avg if selected_land == "cz" else sk_avg
         nat_country = selected_land.upper()
-        reports = list(
-            Note.objects
-            .filter(note_type__startswith="system_", is_hidden=False)
-            .filter(Q(country=selected_land) | Q(country=Note.COUNTRY_BOTH))
-            .order_by("-is_pinned", "-created_at")[:8]
-        )
+        base = (Note.objects
+                .filter(note_type__startswith="system_", is_hidden=False)
+                .filter(Q(country=selected_land) | Q(country=Note.COUNTRY_BOTH)))
+        reports = _filter_reports(base)
         return render(request, "notes/point_detail.html", {
             "points": points,
             "cz_pts": cz_pts, "sk_pts": sk_pts,
@@ -504,6 +577,7 @@ def point_detail(request):
             "nat_avg": nat_avg,
             "nat_country": nat_country,
             "reports": reports,
+            "r_rozsah": r_rozsah, "r_horizont": r_horizont, "r_zeme": r_zeme,
             # No per-city data in national view
             "today_row": None, "forecast_rows": [],
             "chart_json": {"dates": [], "temps_max": [], "temps_min": []},
@@ -590,6 +664,7 @@ def point_detail(request):
                             "delta": delta,
                             "latest": lt,
                             "prev": pt,
+                            "pct": _temp_pct(delta, pt),
                         })
 
     # ── Per-point seasonal series for the horizon switcher ──
@@ -614,12 +689,10 @@ def point_detail(request):
             target["temps"].append(round(r.temp_mean, 1))
 
     # ── System reports for this point's country (hidden notes excluded) ──
-    reports = list(
-        Note.objects
-        .filter(note_type__startswith="system_", is_hidden=False)
-        .filter(Q(country=selected.country.lower()) | Q(country=Note.COUNTRY_BOTH))
-        .order_by("-is_pinned", "-created_at")[:8]
-    )
+    base = (Note.objects
+            .filter(note_type__startswith="system_", is_hidden=False)
+            .filter(Q(country=selected.country.lower()) | Q(country=Note.COUNTRY_BOTH)))
+    reports = _filter_reports(base)
 
     return render(request, "notes/point_detail.html", {
         "points": points,
@@ -636,6 +709,7 @@ def point_detail(request):
         "has_mid": bool(mid_chart["dates"]),
         "has_long": bool(long_chart["dates"]),
         "reports": reports,
+        "r_rozsah": r_rozsah, "r_horizont": r_horizont, "r_zeme": r_zeme,
         "revision_deltas": revision_deltas,
         "latest_issued": latest_issued,
     })
