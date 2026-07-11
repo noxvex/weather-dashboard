@@ -1118,6 +1118,40 @@ hr { border: none; border-top: 1px solid var(--border); margin: 1.25rem 0; }
 .report-body { font-size: 13.5px; line-height: 1.6; color: var(--text); }
 
 
+/* ── Bod point selector: two country cards side by side ── */
+.bod-selector {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--grid-gap);
+    margin-bottom: 1.5rem;
+}
+
+.bod-selector .pt-group {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 13px;
+}
+
+.bod-selector .fc-row--point {
+    display: flex;
+    text-decoration: none;
+    color: var(--text);
+    border-radius: 6px;
+    padding: 6px 4px;
+    transition: background .12s;
+}
+.bod-selector .fc-row--point:hover { background: rgba(255,255,255,.04); text-decoration: none; }
+.bod-selector .fc-row--sel {
+    background: rgba(74,158,255,.10);
+    border-left: 3px solid var(--accent);
+    padding-left: 8px;
+}
+
+@media (max-width: 720px) {
+    .bod-selector { grid-template-columns: 1fr; }
+}
+
 /* ── Bod two-column layout ─────────────────────────────── */
 .bod-grid {
     display: grid;

@@ -46,3 +46,9 @@ def abs_val(value):
     if value is None:
         return None
     return abs(value)
+
+
+@register.filter
+def get_item(d, key):
+    """Dict lookup in templates: {{ dict|get_item:key }}"""
+    return d.get(key)

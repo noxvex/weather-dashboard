@@ -469,14 +469,56 @@ def point_detail(request):
     if not points:
         return render(request, "notes/point_detail.html", {"points": []})
 
-    # Selected point via ?bod=<id>, default to first
+    today = date.today()
+
+    # ── National summary + per-point today rows for the selector ──
+    batch_rows = _get_latest_short_rows()
+    _, cz_avg, sk_avg, cz_today, sk_today = _get_weather_panel(batch_rows)
+
+    # Lookup dict for optional today-temp display in selector (may be incomplete)
+    today_by_pid = {r.point_id: r for r in (cz_today or []) + (sk_today or [])}
+    # All points split by country (used for selector regardless of forecast data)
+    cz_pts = sorted([p for p in points if p.country == "CZ"], key=lambda p: p.name)
+    sk_pts = sorted([p for p in points if p.country == "SK"], key=lambda p: p.name)
+
+    # ── Determine selection: ?land=cz/sk → national view; ?bod=pk → city ──
+    land = request.GET.get("land", "").lower()
+    selected_land = land if land in ("cz", "sk") else None
+    selected = None
+
+    if selected_land:
+        nat_avg = cz_avg if selected_land == "cz" else sk_avg
+        nat_country = selected_land.upper()
+        reports = list(
+            Note.objects
+            .filter(note_type__startswith="system_", is_hidden=False)
+            .filter(Q(country=selected_land) | Q(country=Note.COUNTRY_BOTH))
+            .order_by("-is_pinned", "-created_at")[:8]
+        )
+        return render(request, "notes/point_detail.html", {
+            "points": points,
+            "cz_pts": cz_pts, "sk_pts": sk_pts,
+            "today_by_pid": today_by_pid,
+            "cz_avg": cz_avg, "sk_avg": sk_avg,
+            "selected_land": selected_land,
+            "nat_avg": nat_avg,
+            "nat_country": nat_country,
+            "reports": reports,
+            # No per-city data in national view
+            "today_row": None, "forecast_rows": [],
+            "chart_json": {"dates": [], "temps_max": [], "temps_min": []},
+            "mid_chart": {"dates": [], "temps": []},
+            "long_chart": {"dates": [], "temps": []},
+            "has_mid": False, "has_long": False,
+            "revision_deltas": [], "latest_issued": None,
+        })
+
+    # ── City selection via ?bod=<id>, default to first point ──
     try:
         point_id = int(request.GET.get("bod", points[0].pk))
         selected = next((p for p in points if p.pk == point_id), points[0])
     except (ValueError, TypeError):
         selected = points[0]
-
-    today = date.today()
 
     # Latest issued batch for this point
     latest_issued = (
@@ -581,6 +623,10 @@ def point_detail(request):
 
     return render(request, "notes/point_detail.html", {
         "points": points,
+        "cz_pts": cz_pts, "sk_pts": sk_pts,
+        "today_by_pid": today_by_pid,
+        "cz_avg": cz_avg, "sk_avg": sk_avg,
+        "selected_land": None,
         "selected": selected,
         "today_row": today_row,
         "forecast_rows": forecast_rows,

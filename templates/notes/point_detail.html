@@ -1,7 +1,11 @@
 {% extends "base.html" %}
 {% load weather_tags %}
 
-{% block title %}{{ selected.name }} — Weather Dashboard{% endblock %}
+{% block title %}
+    {% if selected_land %}{{ nat_country }}
+    {% elif selected %}{{ selected.name }}
+    {% else %}Bod{% endif %} — Weather Dashboard
+{% endblock %}
 
 {% block extra_head %}
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
@@ -17,16 +21,129 @@
     </div>
 {% else %}
 
-{# ── Point selector ── #}
-<form method="get" style="margin-bottom:0;">
-    <select name="bod" class="point-select" onchange="this.form.submit()">
-        {% for p in points %}
-            <option value="{{ p.pk }}" {% if p.pk == selected.pk %}selected{% endif %}>
-                {{ p.name }} ({{ p.country }})
-            </option>
+{# ── Point selector: CZ / SK expandable cards ── #}
+<div class="bod-selector">
+
+    <details class="pt-group" open>
+        <summary class="pt-bar pt-cz">
+            Česká republika
+            <span class="pt-count">
+                {% if cz_avg.temperature_max is not None %}{{ cz_avg.temperature_max|temp_round }}&thinsp;° avg · {% endif %}
+                {{ cz_pts|length }}&thinsp;bodů
+            </span>
+        </summary>
+        {# National CZ overview link #}
+        <a href="?land=cz" class="fc-row fc-row--point{% if selected_land == 'cz' %} fc-row--sel{% endif %}">
+            <span class="fc-day" style="font-style:italic; color:var(--accent);">Přehled ČR</span>
+            <span class="fc-range" style="color:var(--muted); font-size:12px;">
+                {% if cz_avg.temperature_max is not None %}{{ cz_avg.temperature_max|temp_round }}°{% else %}—{% endif %}
+            </span>
+        </a>
+        {# Individual CZ cities — always shown, temp optional #}
+        {% for pt in cz_pts %}{% with row=today_by_pid|get_item:pt.pk %}
+        <a href="?bod={{ pt.pk }}" class="fc-row fc-row--point{% if selected and selected.pk == pt.pk %} fc-row--sel{% endif %}">
+            <span class="fc-day">{{ pt.name }}</span>
+            {% if row %}
+            <span class="fc-icon">{{ row.weather_code|weather_icon }}</span>
+            <span class="fc-range">
+                {{ row.temperature_min|temp_round }}°
+                <span class="fc-track"><span class="fc-fill" style="left:15%; width:70%;"></span></span>
+                {{ row.temperature_max|temp_round }}°
+            </span>
+            {% else %}
+            <span class="fc-range" style="color:var(--muted); font-size:12px;">—</span>
+            {% endif %}
+        </a>
+        {% endwith %}{% endfor %}
+    </details>
+
+    <details class="pt-group" open>
+        <summary class="pt-bar pt-sk">
+            Slovensko
+            <span class="pt-count">
+                {% if sk_avg.temperature_max is not None %}{{ sk_avg.temperature_max|temp_round }}&thinsp;° avg · {% endif %}
+                {{ sk_pts|length }}&thinsp;bodů
+            </span>
+        </summary>
+        {# National SK overview link #}
+        <a href="?land=sk" class="fc-row fc-row--point{% if selected_land == 'sk' %} fc-row--sel{% endif %}">
+            <span class="fc-day" style="font-style:italic; color:var(--teal);">Přehled SR</span>
+            <span class="fc-range" style="color:var(--muted); font-size:12px;">
+                {% if sk_avg.temperature_max is not None %}{{ sk_avg.temperature_max|temp_round }}°{% else %}—{% endif %}
+            </span>
+        </a>
+        {# Individual SK cities — always shown, temp optional #}
+        {% for pt in sk_pts %}{% with row=today_by_pid|get_item:pt.pk %}
+        <a href="?bod={{ pt.pk }}" class="fc-row fc-row--point{% if selected and selected.pk == pt.pk %} fc-row--sel{% endif %}">
+            <span class="fc-day">{{ pt.name }}</span>
+            {% if row %}
+            <span class="fc-icon">{{ row.weather_code|weather_icon }}</span>
+            <span class="fc-range">
+                {{ row.temperature_min|temp_round }}°
+                <span class="fc-track"><span class="fc-fill" style="left:15%; width:70%;"></span></span>
+                {{ row.temperature_max|temp_round }}°
+            </span>
+            {% else %}
+            <span class="fc-range" style="color:var(--muted); font-size:12px;">—</span>
+            {% endif %}
+        </a>
+        {% endwith %}{% endfor %}
+    </details>
+
+</div>
+
+{# ═══════════════════════════════════════════════════════ #}
+{#   NATIONAL VIEW  (?land=cz / ?land=sk)                 #}
+{# ═══════════════════════════════════════════════════════ #}
+{% if selected_land %}
+
+<div class="hero">
+    <div class="hero-label">{{ nat_country }} · NÁRODNÍ PRŮMĚR · DNES</div>
+    <div class="hero-num">
+        {% if nat_avg.temperature_max is not None %}{{ nat_avg.temperature_max|temp_round }}°{% else %}—{% endif %}
+    </div>
+    <div class="hero-cond">
+        {% if nat_avg.temperature_min is not None %}min {{ nat_avg.temperature_min|temp_round }}°{% endif %}
+        {% if nat_avg.precipitation_sum is not None %}· {{ nat_avg.precipitation_sum|floatformat:1 }} mm srážek{% endif %}
+    </div>
+</div>
+
+<div class="coming-soon" style="margin-bottom:1.5rem;">
+    <span class="cs-icon">📊</span>
+    <p>Detailní předpověď a graf jsou k dispozici pro <strong>jednotlivá města</strong> — vyberte město ze seznamu výše.</p>
+</div>
+
+{# System reports still useful at national level #}
+<div class="card">
+    <div class="card-title">Co očekávat <span class="hint">systémové reporty pro {{ nat_country }}</span></div>
+    {% if reports %}
+        {% for r in reports %}
+        <div class="report-row note--h-{{ r.horizon }}">
+            <div class="report-meta">
+                {% if r.note_type == "system_change" %}
+                    <span class="note-badge badge-change">změna</span>
+                {% else %}
+                    <span class="note-badge badge-outlook">výhled</span>
+                {% endif %}
+                <span class="note-badge badge-h-{{ r.horizon }}">{{ r.get_horizon_display }}</span>
+                {% if r.country == "cz" %}<span class="note-badge badge-country cz">CZ</span>
+                {% elif r.country == "sk" %}<span class="note-badge badge-country sk">SK</span>
+                {% else %}<span class="note-badge badge-country">CZ + SK</span>{% endif %}
+                <span class="note-time">{{ r.created_at|date:"j. n. Y" }}</span>
+                {% if r.is_pinned %}<span class="note-badge badge-pinned">📌 připnuto</span>{% endif %}
+            </div>
+            <div class="report-body">{{ r.body }}</div>
+        </div>
         {% endfor %}
-    </select>
-</form>
+    {% else %}
+        <div class="no-data" style="padding:1rem 0;">Žádné aktuální systémové reporty pro {{ nat_country }}.</div>
+    {% endif %}
+</div>
+
+{# ═══════════════════════════════════════════════════════ #}
+{#   CITY VIEW  (?bod=pk)                                  #}
+{# ═══════════════════════════════════════════════════════ #}
+{% else %}
 
 {# ── Hero: single point ── #}
 <div class="hero">
@@ -62,7 +179,6 @@
             <span class="fc-range">
                 {{ t_min|temp_round }}°
                 <span class="fc-track">
-                    {# Position the fill bar relative to the week's range #}
                     <span class="fc-fill" style="left:15%; width:70%;"></span>
                 </span>
                 {{ t_max|temp_round }}°
@@ -153,11 +269,13 @@
 </div>
 </div>
 
-{% endif %}{# end if points #}
+{% endif %}{# end if selected_land / else #}
+{% endif %}{# end if not points #}
 
 {% endblock %}
 
 {% block extra_js %}
+{% if not selected_land %}
 {{ chart_json|json_script:"point-chart-data" }}
 {{ mid_chart|json_script:"point-mid-data" }}
 {{ long_chart|json_script:"point-long-data" }}
@@ -248,4 +366,5 @@
     });
 }());
 </script>
+{% endif %}
 {% endblock %}
