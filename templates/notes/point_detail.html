@@ -47,7 +47,7 @@
             <span class="fc-icon">{{ row.weather_code|weather_icon }}</span>
             <span class="fc-range">
                 {{ row.temperature_min|temp_round }}°
-                <span class="fc-track"><span class="fc-fill" style="left:15%; width:70%;"></span></span>
+                <span class="fc-track"><span class="fc-fill" style="{% fc_fill_style row.temperature_min row.temperature_max %}"></span></span>
                 {{ row.temperature_max|temp_round }}°
             </span>
             {% else %}
@@ -80,7 +80,7 @@
             <span class="fc-icon">{{ row.weather_code|weather_icon }}</span>
             <span class="fc-range">
                 {{ row.temperature_min|temp_round }}°
-                <span class="fc-track"><span class="fc-fill" style="left:15%; width:70%;"></span></span>
+                <span class="fc-track"><span class="fc-fill" style="{% fc_fill_style row.temperature_min row.temperature_max %}"></span></span>
                 {{ row.temperature_max|temp_round }}°
             </span>
             {% else %}
@@ -180,7 +180,7 @@
             <span class="fc-range">
                 {{ t_min|temp_round }}°
                 <span class="fc-track">
-                    <span class="fc-fill" style="left:15%; width:70%;"></span>
+                    <span class="fc-fill" style="{% fc_fill_style t_min t_max %}"></span>
                 </span>
                 {{ t_max|temp_round }}°
             </span>
@@ -232,13 +232,30 @@
 <div class="card">
     <div class="card-title">Vývoj teploty <span class="hint">{{ selected.name }}</span></div>
     <div class="seg">
-        <button class="seg-short on" data-mode="short">Krátkodobá<small>1–16 dní</small></button>
+        <button class="seg-short{% if not custom_active %} on{% endif %}" data-mode="short">Krátkodobá<small>1–16 dní</small></button>
         <button class="seg-mid{% if not has_mid %} soon" title="Data se sbírají{% endif %}" data-mode="mid">
             Střednědobá<small>1–4 měsíce · SEAS5</small>
         </button>
         <button class="seg-long{% if not has_long %} soon" title="Data se sbírají{% endif %}" data-mode="long">
             Dlouhodobá<small>4–7 měsíců · SEAS5</small>
         </button>
+        <button class="seg-custom{% if custom_active %} on{% endif %}" data-mode="custom">Vlastní<small>rok + týden</small></button>
+    </div>
+    <div class="custom-box custom-week-box" id="custom-week-box"{% if not custom_active %} style="display:none;"{% endif %}>
+        <form method="get" class="custom-week-form">
+            {% if selected %}<input type="hidden" name="bod" value="{{ selected.pk }}">{% endif %}
+            <label>Rok
+                <input type="number" name="custom_year" min="{{ min_custom_year }}" max="{{ max_custom_year }}"
+                       value="{{ custom_year|default:max_custom_year }}">
+            </label>
+            <label>Týden
+                <input type="number" name="custom_week" min="1" max="53" value="{{ custom_week|default:'' }}">
+            </label>
+            <button type="submit" class="mode-btn">Zobrazit</button>
+        </form>
+        {% if custom_active and not custom_chart.kind %}
+        <div class="no-data" style="padding:0.75rem 0 0;">Data pro tento týden nejsou dostupná.</div>
+        {% endif %}
     </div>
     <div id="point-chart"></div>
 </div>
@@ -281,26 +298,34 @@
 {{ chart_json|json_script:"point-chart-data" }}
 {{ mid_chart|json_script:"point-mid-data" }}
 {{ long_chart|json_script:"point-long-data" }}
+{{ custom_chart|json_script:"point-custom-data" }}
 <script>
 (function () {
     const datasets = {
-        short: JSON.parse(document.getElementById('point-chart-data').textContent),
-        mid:   JSON.parse(document.getElementById('point-mid-data').textContent),
-        long:  JSON.parse(document.getElementById('point-long-data').textContent),
+        short:  JSON.parse(document.getElementById('point-chart-data').textContent),
+        mid:    JSON.parse(document.getElementById('point-mid-data').textContent),
+        long:   JSON.parse(document.getElementById('point-long-data').textContent),
+        custom: JSON.parse(document.getElementById('point-custom-data').textContent),
     };
-    // Keep in sync with --h-short / --h-mid / --h-long in main.css
-    const modeColors = { short: '#4A9EFF', mid: '#FBBF24', long: '#F472B6' };
+    // Keep in sync with --h-short / --h-mid / --h-long in main.css; custom has no fixed horizon color
+    const modeColors = { short: '#4A9EFF', mid: '#FBBF24', long: '#F472B6', custom: '#8A97AD' };
+    const customActive = {{ custom_active|yesno:"true,false" }};
     if (!datasets.short.dates || !datasets.short.dates.length) return;
 
     function buildTraces(mode) {
         const d = datasets[mode];
-        if (mode === 'short') {
+        if (mode === 'custom' && d.kind !== 'range' && d.kind !== 'mean') {
+            return [];
+        }
+        if (mode === 'short' || (mode === 'custom' && d.kind === 'range')) {
+            const maxColor = mode === 'custom' ? modeColors.custom : '#4A9EFF';
+            const maxFill = mode === 'custom' ? 'rgba(138,151,173,0.10)' : 'rgba(74,158,255,0.10)';
             return [
                 {
                     x: d.dates, y: d.temps_max,
                     type: 'scatter', mode: 'lines', name: 'Max',
-                    line: { color: '#4A9EFF', width: 2.5, shape: 'spline' },
-                    fill: 'tozeroy', fillcolor: 'rgba(74,158,255,0.10)',
+                    line: { color: maxColor, width: 2.5, shape: 'spline' },
+                    fill: 'tozeroy', fillcolor: maxFill,
                     hovertemplate: '%{y:.1f}°C<extra>Max</extra>',
                 },
                 {
@@ -311,7 +336,7 @@
                 },
             ];
         }
-        // Seasonal modes: single ensemble-mean trace in the horizon color
+        // Seasonal / custom-mean modes: single ensemble-mean trace in the horizon color
         return [{
             x: d.dates, y: d.temps,
             type: 'scatter', mode: 'lines', name: 'Průměr (SEAS5)',
@@ -320,7 +345,7 @@
         }];
     }
 
-    const traces = buildTraces('short');
+    const traces = buildTraces(customActive && datasets.custom.kind ? 'custom' : 'short');
 
     const layout = {
         paper_bgcolor: 'transparent',
@@ -356,12 +381,16 @@
 
     Plotly.newPlot('point-chart', traces, layout, { displayModeBar: false, responsive: true });
 
-    // Horizon switcher — swaps the actual dataset (short / mid / long)
+    const customBox = document.getElementById('custom-week-box');
+
+    // Horizon switcher — swaps the actual dataset (short / mid / long / custom)
     document.querySelectorAll('.seg button[data-mode]').forEach(btn => {
         btn.addEventListener('click', function () {
             if (this.classList.contains('soon')) return;
             document.querySelectorAll('.seg button').forEach(b => b.classList.remove('on'));
             this.classList.add('on');
+            if (customBox) customBox.style.display = this.dataset.mode === 'custom' ? '' : 'none';
+            if (this.dataset.mode === 'custom' && !datasets.custom.kind) return;  // nothing to plot yet
             Plotly.react('point-chart', buildTraces(this.dataset.mode), layout,
                          { displayModeBar: false, responsive: true });
         });

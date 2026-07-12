@@ -297,7 +297,7 @@
                         <span class="fc-icon">{{ row.weather_code|weather_icon }}</span>
                         <span class="fc-range">
                             {{ t_min|temp_round }}°
-                            <span class="fc-track"><span class="fc-fill" style="left:15%; width:70%;"></span></span>
+                            <span class="fc-track"><span class="fc-fill" style="{% fc_fill_style t_min t_max %}"></span></span>
                             {{ t_max|temp_round }}°
                         </span>
                         <span class="fc-rain">{% if row.precipitation_sum is not None %}{{ row.precipitation_sum }}&thinsp;mm{% else %}—{% endif %}</span>
@@ -317,7 +317,7 @@
                         <span class="fc-icon">{{ row.weather_code|weather_icon }}</span>
                         <span class="fc-range">
                             {{ t_min|temp_round }}°
-                            <span class="fc-track"><span class="fc-fill" style="left:15%; width:70%;"></span></span>
+                            <span class="fc-track"><span class="fc-fill" style="{% fc_fill_style t_min t_max %}"></span></span>
                             {{ t_max|temp_round }}°
                         </span>
                         <span class="fc-rain">{% if row.precipitation_sum is not None %}{{ row.precipitation_sum }}&thinsp;mm{% else %}—{% endif %}</span>

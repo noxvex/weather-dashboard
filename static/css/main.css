@@ -293,9 +293,34 @@ a:hover { text-decoration: underline; }
     box-shadow: 0 0 16px color-mix(in srgb, var(--h-long) 28%, transparent);
 }
 
+.seg button.seg-custom.on {
+    background: linear-gradient(160deg, rgba(138,151,173,.22), rgba(138,151,173,.06));
+    color: #fff;
+    border-color: rgba(138,151,173,.5);
+    box-shadow: 0 0 16px rgba(138,151,173,.2);
+}
+
 .seg button.soon {
     opacity: .4;
     cursor: default;
+}
+
+/* ── Custom year/week horizon (Bod detail page) ─────────── */
+.custom-week-box {
+    margin-bottom: 14px;
+}
+
+.custom-week-form {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.custom-week-form label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
 
 /* ── Chart ────────────────────────────────────────────── */

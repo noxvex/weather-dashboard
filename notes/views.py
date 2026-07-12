@@ -544,6 +544,71 @@ def revision_tracker(request):
     return render(request, "notes/revision_tracker.html", context)
 
 
+def _get_custom_week_data(point, year, week):
+    """
+    Data for one arbitrary ISO year/week for a single point, checked in order:
+    short-range forecast (min/max) → historical actuals (min/max) → seasonal
+    forecast (mean only). Returns None if the week is invalid or no source has
+    any rows for it.
+    """
+    try:
+        week_start = date.fromisocalendar(year, week, 1)
+    except ValueError:
+        return None
+    week_end = week_start + timedelta(days=6)
+
+    short_rows = list(
+        DailyForecast.objects
+        .filter(point=point, horizon=DailyForecast.HORIZON_SHORT,
+                forecast_date__gte=week_start, forecast_date__lte=week_end)
+        .order_by("forecast_date", "-issued_at")
+    )
+    if short_rows:
+        latest_per_day = {}
+        for r in short_rows:
+            latest_per_day.setdefault(r.forecast_date, r)  # first hit = newest issued_at
+        ordered = sorted(latest_per_day.values(), key=lambda r: r.forecast_date)
+        return {
+            "kind": "range",
+            "dates": [r.forecast_date.isoformat() for r in ordered],
+            "temps_max": [r.temperature_max for r in ordered],
+            "temps_min": [r.temperature_min for r in ordered],
+        }
+
+    hist_rows = list(
+        HistoricalActual.objects
+        .filter(point=point, date__gte=week_start, date__lte=week_end)
+        .order_by("date")
+    )
+    if hist_rows:
+        return {
+            "kind": "range",
+            "dates": [r.date.isoformat() for r in hist_rows],
+            "temps_max": [r.temp_max for r in hist_rows],
+            "temps_min": [r.temp_min for r in hist_rows],
+        }
+
+    seas_rows = list(
+        MediumLongRangeForecast.objects
+        .filter(point=point, target_date__gte=week_start, target_date__lte=week_end)
+        .order_by("target_date", "-issued_at")
+    )
+    if seas_rows:
+        latest_per_day = {}
+        for r in seas_rows:
+            latest_per_day.setdefault(r.target_date, r)
+        ordered = sorted(latest_per_day.values(), key=lambda r: r.target_date)
+        temps = [round(r.temp_mean, 1) for r in ordered if r.temp_mean is not None]
+        if temps:
+            return {
+                "kind": "mean",
+                "dates": [r.target_date.isoformat() for r in ordered if r.temp_mean is not None],
+                "temps": temps,
+            }
+
+    return None
+
+
 # ── Point detail ─────────────────────────────────────────────────────────────
 
 @login_required
@@ -575,6 +640,20 @@ def point_detail(request):
         qs = _apply_country_filter(qs, r_zeme)
         return list(qs.order_by("-is_pinned", "-created_at")[:12])
 
+    # ── Custom year/week horizon (?custom_year=&custom_week=) ──
+    min_custom_year = 2015
+    max_custom_year = today.year + 1
+    custom_year_raw = request.GET.get("custom_year")
+    custom_week_raw = request.GET.get("custom_week")
+    custom_active = bool(custom_year_raw and custom_week_raw)
+    custom_year = custom_week = None
+    if custom_active:
+        try:
+            custom_year = min(max_custom_year, max(min_custom_year, int(custom_year_raw)))
+            custom_week = min(53, max(1, int(custom_week_raw)))
+        except ValueError:
+            custom_active = False
+
     # ── Determine selection: ?land=cz/sk → national view; ?bod=pk → city ──
     land = request.GET.get("land", "").lower()
     selected_land = land if land in ("cz", "sk") else None
@@ -604,6 +683,9 @@ def point_detail(request):
             "long_chart": {"dates": [], "temps": []},
             "has_mid": False, "has_long": False,
             "revision_deltas": [], "latest_issued": None,
+            "custom_active": False, "custom_chart": {"kind": None},
+            "custom_year": None, "custom_week": None,
+            "min_custom_year": min_custom_year, "max_custom_year": max_custom_year,
         })
 
     # ── City selection via ?bod=<id>, default to first point ──
@@ -713,6 +795,11 @@ def point_detail(request):
             .filter(Q(country=selected.country.lower()) | Q(country=Note.COUNTRY_BOTH)))
     reports = _filter_reports(base)
 
+    # ── Custom year/week horizon, if requested ──
+    custom_chart = {"kind": None}
+    if custom_active:
+        custom_chart = _get_custom_week_data(selected, custom_year, custom_week) or {"kind": None}
+
     return render(request, "notes/point_detail.html", {
         "points": points,
         "cz_pts": cz_pts, "sk_pts": sk_pts,
@@ -731,6 +818,12 @@ def point_detail(request):
         "r_rozsah": r_rozsah, "r_horizont": r_horizont, "r_zeme": r_zeme,
         "revision_deltas": revision_deltas,
         "latest_issued": latest_issued,
+        "custom_active": custom_active,
+        "custom_chart": custom_chart,
+        "custom_year": custom_year,
+        "custom_week": custom_week,
+        "min_custom_year": min_custom_year,
+        "max_custom_year": max_custom_year,
     })
 
 
