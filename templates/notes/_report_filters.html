@@ -1,6 +1,8 @@
-{# Report filter bar for Bod / national detail pages.
-   Expects: r_rozsah, r_horizont, r_zeme from view context.
-   Preserves ?bod=, ?land= and other params via hidden inputs. #}
+{% comment %}
+Report filter bar for Bod / national detail pages.
+Expects: r_rozsah, r_horizont, r_zeme from view context.
+Preserves ?bod=, ?land= and other params via hidden inputs.
+{% endcomment %}
 <form id="report-filters" method="get" style="display:none;">
     {% if request.GET.bod %}<input type="hidden" name="bod" value="{{ request.GET.bod }}">{% endif %}
     {% if request.GET.land %}<input type="hidden" name="land" value="{{ request.GET.land }}">{% endif %}

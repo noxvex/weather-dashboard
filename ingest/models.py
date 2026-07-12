@@ -10,6 +10,7 @@ class WeatherPoint(models.Model):
 
     class Meta:
         ordering = ["country", "name"]
+        indexes = [models.Index(fields=["country"])]
 
     def __str__(self):
         return f"{self.name} ({self.country})"
@@ -88,6 +89,10 @@ class HistoricalActual(models.Model):
     class Meta:
         unique_together = [("point", "date")]  # one ground-truth row per point per day
         ordering = ["date"]
+        indexes = [
+            models.Index(fields=["point", "date"]),
+            models.Index(fields=["date"]),
+        ]
 
     def __str__(self):
         return f"{self.point.name} ERA5 {self.date}"
