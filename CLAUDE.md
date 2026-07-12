@@ -1,129 +1,89 @@
-# Phase 4 Build Brief — Weather Dashboard
+# Weather CZ/SK — project context
 
-Paste this into a fresh Claude Code chat. Read fully before writing code. Ask me
-anything ambiguous before generating files. I'm a Python/Django beginner — explain
-non-obvious decisions briefly as you go (docstrings/comments are fine for this).
+Internal weather dashboard for a ~10-person CZ/SK marketing team, built solo by
+a Python/Django beginner (Adam). UI text is Czech; all code/comments English.
 
-## Scope of this phase
+## Stack
+Django + PostgreSQL (Railway, private networking, **Netherlands region — both
+web and DB must stay in the same region**) + Plotly.js + Whitenoise.
+Data: Open-Meteo (forecast, EC46/SEAS5 seasonal, ERA5 historical, CAMS).
+Repo: `noxvex/weather-dashboard` (public). Live: `weather-dashboard-production-6c0f.up.railway.app`.
 
-Data collection pipelines for ALL forecast horizons + historical baseline, PLUS the
-UI/logic that's achievable with data we already have. Medium/long-range and pollen
-UI screens are NOT built yet — data collection starts now so it has time to
-accumulate, screens come in a later phase.
+## Locked design system — do not change without explicit approval
+- Colors: bg `#0A0E1A`, surface `#131C2E`, border `#243044`, text `#E8EDF5`,
+  muted `#8A97AD`, accent blue `#4A9EFF`
+- Horizon colors: `--h-short #4A9EFF` (blue), `--h-mid #FBBF24` (yellow),
+  `--h-long #F472B6` (pink — was green, changed, do not revert)
+- Reserved colors — never reuse for horizons: `--teal #2DD4BF` (system notes
+  only), `--red #F87171` (leader notes / delta-up), `#A78BFA` (admin notes)
+- Delta convention: warmer/up = red + ▲, cooler/down = teal + ▼, always show
+  both °C and % together
 
-## 1. New data sources (all Open-Meteo, dev = no API key)
+## Workflow rules (strict — follow exactly)
+1. Plan one phase in claude.ai first, lock spec, THEN build in Claude Code
+2. One phase per Claude Code session — small verified steps, not big batches
+3. Before changing anything, verify facts first (git diff, actual DB/API
+   response, browser inspection) — never blind-fix code that "looks wrong"
+4. If a requirement is ambiguous or data doesn't exist yet, ASK, don't invent
+5. After any change: verify in browser (or via a real request), not just
+   "code ran without error"
+6. Django template comments `{# ... #}` must be SINGLE LINE ONLY — multiline
+   ones render as literal visible text. Use `{% comment %}...{% endcomment %}`
+   for multiline.
+7. ALWAYS commit and push directly to `main`, never to a worktree or feature
+   branch, unless explicitly told otherwise. Railway only auto-deploys from
+   `main` — work pushed elsewhere silently never reaches production. Before
+   reporting a task as done, confirm with `git branch --show-current` that
+   the commit landed on `main`.
 
-| Source | Base URL env var | Endpoint |
-|---|---|---|
-| Existing short-range | `OPEN_METEO_BASE_URL` (already set) | `/v1/forecast` |
-| Medium+seasonal | `OPEN_METEO_SEASONAL_URL` | `https://seasonal-api.open-meteo.com/v1/forecast` |
-| Historical (ERA5) | `OPEN_METEO_ARCHIVE_URL` | `https://archive-api.open-meteo.com/v1/archive` |
-| Pollen/air quality | `OPEN_METEO_AIRQUALITY_URL` | `https://air-quality-api.open-meteo.com/v1/air-quality` |
+## Known gotchas (already debugged once — don't rediscover)
+- Railway "private networking" only resolves `*.railway.internal` from
+  WITHIN Railway's network. Local `railway run` can't reach it — use
+  `railway ssh` to run management commands against production DB.
+- `railway run` also can't share region latency issues away — if
+  web and DB services are in different regions, every single query pays
+  full cross-region round-trip (~140ms was measured US↔EU). Always confirm
+  both services are in the same region.
+- Whitenoise/static files: `collectstatic` must run in the `web:` Procfile
+  line, not Pre-deploy Command (Pre-deploy runs in an ephemeral container,
+  changes don't persist). Migrations correctly go in Pre-deploy Command.
+- Plotly `<script>` tag must never have `defer` — causes charts to silently
+  not render.
+- ERA5 precipitation aggregates as SUM, temperature as MEAN — don't conflate.
+- `ingest_weather` (short-range 16-day forecast) has no cron/worker service
+  yet — must be triggered manually via `railway ssh` until a scheduled
+  worker service is set up. If data looks stale/missing, check this first.
 
-All follow the same customer-api + key swap pattern as the existing forecast source
-— add matching `_API_KEY` env vars (blank in dev) for each, unused until production.
+## Performance patterns to maintain
+- Avoid duplicate DB round-trips across helper functions in the same view
+  (e.g. don't re-query DailyForecast in 3 different helpers when one shared
+  fetch works) — every query pays full network latency even on fast networks.
+- Cache computed data that changes at most once/day (seasonal SEAS5/EC46
+  data, `.exists()` checks) via Django's cache framework, not per-request.
+- DB indexes exist on: WeatherPoint.country, HistoricalActual(point,date),
+  HistoricalActual.date, DailyForecast(point,forecast_date,horizon),
+  DailyForecast.issued_at, MediumLongRangeForecast(point,target_date,horizon,issued_at).
+  Add matching indexes for any new frequent filter/sort field.
 
-## 2. Model changes
+## Model choice for Claude Code sessions
+- Multi-file builds, wide-scope fixes, anything with real regression risk →
+  **Fable, highest effort** (confirmed more reliable in practice than
+  Sonnet for this, even though slower/costlier — fewer follow-up fix rounds)
+- Logic/data plumbing/backend/git/ops, single clearly-scoped fix → Sonnet
+- Visual/color/chart aesthetic work → Opus high effort, or Fable if scope
+  is wide
 
-**Extend existing forecast model** (or add if not already present):
-- `target_date` (date the forecast is FOR)
-- `issued_at` (timestamp the forecast was FETCHED) — append-only, never overwrite
-- This pair is what makes revision tracking possible: compare rows with the same
-  `target_date` and different `issued_at`.
+## Current status (update this section as phases complete)
+DONE: horizon colors + readability (badges, borders, delta %), Bod page
+CZ/SK country selector with expandable city lists, Aktuality/Bod filters
+(time range, horizon, country), DB indexes, seasonal-data caching, shared
+query helpers in `aktuality()`, fixed multiline-comment bug, migrated
+Postgres to Netherlands region to match web service.
 
-**New: `MediumLongRangeForecast`**
-- point (FK), target_date, issued_at, horizon (`ec46` or `seas5`), temp_mean,
-  temp_anomaly, precip_probability, source_model
-- Populated by scheduled fetch, no UI yet.
-
-**New: `HistoricalActual`**
-- point (FK), date, temp_min, temp_max, precip_mm, wind_kmh
-- One-time backfill command + ongoing daily append so "today" eventually becomes
-  history too.
-
-**New: `PollenRecord`**
-- point (FK), date, issued_at, birch, grass, ragweed, alder, mugwort (whichever
-  CAMS returns for CZ/SK domain), aqi_european
-- Forecast-only, 5-day horizon, no backfill possible.
-
-**Extend `Note` model:**
-- `note_type` field: `human`, `system_change`, `system_outlook` (badge color logic:
-  human = author-based/yxes-red, system_change = teal "systém", system_outlook =
-  teal "výhled" — same color, different label per the mockup)
-- `save()` override: if `note_type` starts with `system_`, force `is_pinned=True`
-  automatically, no manual step.
-
-## 3. Management commands
-
-- `fetch_seasonal` — daily pull from seasonal-api for all 22 points, stores to
-  `MediumLongRangeForecast`
-- `fetch_era5_backfill` — one-time, date-range argument, populates `HistoricalActual`
-  from archive-api (start conservative — e.g. last 2 years — then widen; don't pull
-  decades in one run against free tier without testing volume first)
-- `fetch_pollen` — daily pull from air-quality-api, stores to `PollenRecord`
-- `detect_changes` (extends/creates) — runs against short-range forecast history:
-  - Swing: temp range ≥5°C within any rolling 7-day window → `system_change` note
-  - Heat wave: 3+ consecutive days ≥30°C → `system_change` note
-  - Rain flip: dry→wet or wet→dry day-to-day transition → `system_change` note
-  - Revision delta: same `target_date`, new `issued_at` vs previous → store delta,
-    surface via revision-tracker view (not necessarily a note for every tiny change —
-    use a threshold, e.g. only auto-note deltas ≥3°C, to avoid spam)
-- `generate_outlook_notes` (new) — reads current short-range forecast (0–16 days,
-  data already available, no new source needed):
-  - Rain probability >60% next 7 days → "Očekáváme déšť v následujícím týdnu"
-  - Rain probability <20% next 7 days → "Očekáváme sucho v následujícím týdnu"
-  - Temp trending toward heat-wave threshold but not yet confirmed → hedge language,
-    e.g. "Teploty se blíží k tropickým hodnotám, ale predikce se může změnit"
-  - ALWAYS hedge with probabilistic wording ("očekáváme", "může", "nelze vyloučit")
-    per locked principle — never state medium/long-range as certain
-  - `note_type='system_outlook'`
-
-  NOT included yet (needs ERA5 baseline, defer to when HistoricalActual has enough
-  data): "it should have rained but didn't" style anomaly-vs-normal detection. Once
-  `HistoricalActual` has enough rows to compute a climatological average per point/
-  time-of-year, this becomes a straightforward comparison — don't build it blind now.
-
-## 4. Views / templates
-
-- **Aktuality feed**: add author filter (chips: Vše / yxes / Systém / [named users]).
-  Filter is a simple queryset filter on `Note.author`, no new model needed.
-- **"Since last login" panel**: query forecast-history rows where
-  `issued_at >= request.user.last_login` per point, compare oldest-in-range vs
-  latest, list deltas. `last_login` already exists on `AbstractUser` — no new field.
-- **Revision tracker view**: three buttons (Aktuální / Střednědobá / Dlouhodobá)
-  filtering by lead-time bucket. Střednědobá/Dlouhodobá buttons render a
-  "Data se sbírá, zobrazení brzy" (data collecting, display coming soon) state —
-  they should NOT be hidden, just clearly marked not-yet-populated in UI, since the
-  underlying data IS being collected from this phase onward.
-- **Year-over-year card**: same coming-soon treatment, tied to `HistoricalActual`
-  row count reaching a usable threshold.
-- Graph placement: above the two-column Aktuality/revision layout, per approved
-  mockup (attach mockup HTML if useful reference for template structure/dark theme
-  CSS variables).
-
-## 5. Config / env vars to add
-
-```
-OPEN_METEO_SEASONAL_URL=https://seasonal-api.open-meteo.com/v1/forecast
-OPEN_METEO_SEASONAL_API_KEY=
-OPEN_METEO_ARCHIVE_URL=https://archive-api.open-meteo.com/v1/archive
-OPEN_METEO_ARCHIVE_API_KEY=
-OPEN_METEO_AIRQUALITY_URL=https://air-quality-api.open-meteo.com/v1/air-quality
-OPEN_METEO_AIRQUALITY_API_KEY=
-```
-
-## Build order suggestion (ask me to confirm before starting if unsure)
-
-1. Model changes + migrations (Note fields, target_date/issued_at, new models)
-2. Fetch commands for the 3 new sources (test each returns data before wiring UI)
-3. `detect_changes` + `generate_outlook_notes` logic
-4. Since-login query + author filter on existing Aktuality view
-5. Revision tracker view with coming-soon states
-6. Template/CSS pass matching the approved dark-theme mockup
-
-## Reminders
-
-- `.gitignore` still excludes `.env` — verify before committing new env vars
-- All UI text Czech, all code/comments English
-- Console email backend still fine, no SMTP needed for this phase
-- Commit checkpoint after each numbered step above, not one giant commit
+NEXT UP (original roadmap order): Bod/detail page — larger temperature
+numbers, clarify the unlabeled "bar" element's purpose, selectable forecast
+horizon instead of fixed 7 days, labels above % change indicators, resize
+current-weather vs. forecast sections, scrollable expectations table,
+reconsider graph zoom interaction. Then: Historie (monthly granularity,
+multi-year average curve), data expansion (pollen/AQ/UV/wind/pressure),
+toggleable display layers, graph annotations, mobile — in that order.
