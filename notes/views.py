@@ -9,6 +9,7 @@ from django.db.models.functions import ExtractIsoYear, ExtractWeek, ExtractYear
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
+from django.core.cache import cache
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.http import Http404
@@ -45,27 +46,32 @@ def _temp_pct(delta, prev):
     return round(delta / abs(prev) * 100)
 
 
-def _get_latest_short_rows():
+def _get_latest_short_rows(batches=1):
     """
-    All DailyForecast rows for the most recent short-range batch, with point
-    pre-joined. Two queries total — callers share this result rather than each
-    independently finding the latest batch (was 5 separate queries before).
+    Returns (rows, batch_dates) for the most recent `batches` short-range
+    snapshots, with point pre-joined. Two queries total regardless of batches
+    count — one to find distinct dates, one to fetch all matching rows.
+
+    batch_dates is a list of date objects newest-first (length ≤ batches).
+    When batches=2, rows from both snapshots are mixed; callers that only need
+    the latest should filter by issued_at.date() == batch_dates[0].
     """
-    latest = (
+    batch_dates = list(
         DailyForecast.objects
         .filter(horizon=DailyForecast.HORIZON_SHORT, issued_at__isnull=False)
-        .order_by("-issued_at")
-        .values_list("issued_at", flat=True)
-        .first()
+        .order_by("-issued_at__date")
+        .values_list("issued_at__date", flat=True)
+        .distinct()[:batches]
     )
-    if not latest:
-        return []
-    return list(
+    if not batch_dates:
+        return [], []
+    rows = list(
         DailyForecast.objects
-        .filter(horizon=DailyForecast.HORIZON_SHORT, issued_at=latest)
+        .filter(horizon=DailyForecast.HORIZON_SHORT, issued_at__date__in=batch_dates)
         .select_related("point")
         .order_by("point__name", "forecast_date")
     )
+    return rows, batch_dates
 
 
 def _get_weather_panel(batch_rows):
@@ -164,6 +170,11 @@ def _get_chart_data(batch_rows):
     return result
 
 
+_SEASONAL_CACHE_KEY = "aktuality_seasonal_chart"
+_HISTORICAL_EXISTS_KEY = "aktuality_has_historical"
+_CACHE_TTL = 3600  # 1 hour — seasonal data only changes once per day via cron
+
+
 def _get_seasonal_chart_data():
     """
     Returns (mid, long) chart dicts of SEAS5 seasonal mean temp per target_date
@@ -171,7 +182,12 @@ def _get_seasonal_chart_data():
       mid  = střednědobá, target_date within 1–4 months from today
       long = dlouhodobá,  target_date beyond 4 months (to ~7 months)
     Each is {cz: [{date, temp}, ...], sk: [...]}; empty lists if no data yet.
+    Result is cached for 1 hour (LocMemCache by default, no extra infra needed).
     """
+    cached = cache.get(_SEASONAL_CACHE_KEY)
+    if cached is not None:
+        return cached
+
     empty = {"cz": [], "sk": []}
     latest = (
         MediumLongRangeForecast.objects
@@ -181,7 +197,9 @@ def _get_seasonal_chart_data():
         .first()
     )
     if not latest:
-        return dict(empty), dict(empty)
+        result = dict(empty), dict(empty)
+        cache.set(_SEASONAL_CACHE_KEY, result, _CACHE_TTL)
+        return result
 
     rows = list(
         MediumLongRangeForecast.objects
@@ -210,45 +228,38 @@ def _get_seasonal_chart_data():
             for country, by_date in by_country.items()
         }
 
-    return to_chart(buckets["mid"]), to_chart(buckets["long"])
+    result = to_chart(buckets["mid"]), to_chart(buckets["long"])
+    cache.set(_SEASONAL_CACHE_KEY, result, _CACHE_TTL)
+    return result
 
 
-def _get_revision_summary(limit=5):
+def _get_revision_summary(all_rows, batch_dates, limit=5):
     """
     Compact revision summary for the main page: the two most recent short-range
     snapshots compared (same target_date, different issued_at) with the largest
-    national temp deltas. Surfaces the existing revision pattern — the full
-    detail lives on the revision_tracker page. Returns None if < 2 snapshots.
+    national temp deltas. Derived entirely from pre-fetched rows — zero extra
+    queries. Returns None if batch_dates has fewer than 2 entries.
     """
-    today = date.today()
-    batch_dates = list(
-        DailyForecast.objects
-        .filter(horizon=DailyForecast.HORIZON_SHORT, issued_at__isnull=False)
-        .order_by("-issued_at__date")
-        .values_list("issued_at__date", flat=True)
-        .distinct()[:2]
-    )
     if len(batch_dates) < 2:
         return None
 
+    today = date.today()
     latest, previous = batch_dates[0], batch_dates[1]
 
-    def nat_series(batch_date, country):
-        rows = DailyForecast.objects.filter(
-            horizon=DailyForecast.HORIZON_SHORT,
-            issued_at__date=batch_date,
-            point__country=country,
-            forecast_date__gte=today,
-        )
-        by_date = defaultdict(list)
-        for r in rows:
-            by_date[r.forecast_date].append(r)
-        return {fd: _avg(day_rows, "temperature_max") for fd, day_rows in by_date.items()}
+    # Split pre-fetched rows by batch date into nested dicts for fast lookup
+    by_batch: dict[date, dict[str, dict]] = {latest: defaultdict(lambda: defaultdict(list)),
+                                              previous: defaultdict(lambda: defaultdict(list))}
+    for r in all_rows:
+        if r.issued_at is None or r.forecast_date < today:
+            continue
+        bd = r.issued_at.date()
+        if bd in by_batch:
+            by_batch[bd][r.point.country][r.forecast_date].append(r)
 
     deltas = []
     for country, label in [("CZ", "ČR"), ("SK", "SR")]:
-        latest_s = nat_series(latest, country)
-        prev_s = nat_series(previous, country)
+        latest_s = {fd: _avg(rows, "temperature_max") for fd, rows in by_batch[latest][country].items()}
+        prev_s = {fd: _avg(rows, "temperature_max") for fd, rows in by_batch[previous][country].items()}
         for fd in latest_s:
             lt, pt = latest_s[fd], prev_s.get(fd)
             if lt is not None and pt is not None:
@@ -355,19 +366,27 @@ def aktuality(request):
     for note in notes:
         note.user_can_modify = _can_modify(request.user, note)
 
-    # Fetch all DailyForecast rows for the latest batch once; both the sidebar
-    # weather panel and the Plotly chart share this result (was 5 queries, now 2).
-    batch_rows = _get_latest_short_rows()
-    forecast_date, cz_avg, sk_avg, cz_points, sk_points = _get_weather_panel(batch_rows)
+    # Fetch last two short-range batches in one shared query pair.
+    # latest_rows (newest batch only) feeds the weather panel and chart.
+    # all_rows (both batches) feeds the revision summary — no separate queries.
+    all_rows, batch_dates = _get_latest_short_rows(batches=2)
+    latest_date = batch_dates[0] if batch_dates else None
+    latest_rows = [r for r in all_rows if r.issued_at and r.issued_at.date() == latest_date] if latest_date else []
+
+    forecast_date, cz_avg, sk_avg, cz_points, sk_points = _get_weather_panel(latest_rows)
     since_login = _get_since_login(request.user.last_login)
     filter_chips = _build_filter_chips(notes_qs)
     # Pass the raw dict — the json_script template filter handles serialization.
     # Pre-dumping here double-encodes: JSON.parse in the browser then yields a
     # string instead of an object and the chart silently renders nothing.
-    chart_json = _get_chart_data(batch_rows)
+    chart_json = _get_chart_data(latest_rows)
     mid_json, long_json = _get_seasonal_chart_data()
-    revision_summary = _get_revision_summary()
-    has_historical = HistoricalActual.objects.exists()
+    revision_summary = _get_revision_summary(all_rows, batch_dates)
+
+    has_historical = cache.get(_HISTORICAL_EXISTS_KEY)
+    if has_historical is None:
+        has_historical = HistoricalActual.objects.exists()
+        cache.set(_HISTORICAL_EXISTS_KEY, has_historical, _CACHE_TTL)
     has_mid = bool(mid_json.get("cz") or mid_json.get("sk"))
     has_long = bool(long_json.get("cz") or long_json.get("sk"))
 
@@ -536,7 +555,7 @@ def point_detail(request):
     today = date.today()
 
     # ── National summary + per-point today rows for the selector ──
-    batch_rows = _get_latest_short_rows()
+    batch_rows, _ = _get_latest_short_rows()
     _, cz_avg, sk_avg, cz_today, sk_today = _get_weather_panel(batch_rows)
 
     # Lookup dict for optional today-temp display in selector (may be incomplete)
