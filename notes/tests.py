@@ -358,6 +358,12 @@ class RevisionTrackerMlrBucketTest(TestCase):
         self.assertEqual(row["temp_delta"], 2.0)
         self.assertEqual(row["precip_prob_delta"], 15)
 
+        # precip_prob_delta is a raw mm delta (documented placeholder, not a
+        # real probability) — the rendered label must say "mm", never "pb".
+        content = resp.content.decode()
+        self.assertIn("+15&thinsp;mm", content)
+        self.assertNotIn("pb", content)
+
     def test_seas5_fixtures_do_not_leak_into_ec46_bucket(self):
         MediumLongRangeForecast.objects.create(
             point=self.point, target_date=date.today() + timedelta(days=100),

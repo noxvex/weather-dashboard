@@ -62,9 +62,13 @@ Repo: `noxvex/weather-dashboard` (public). Live: `weather-dashboard-production-6
 - Plotly `<script>` tag must never have `defer` — causes charts to silently
   not render.
 - ERA5 precipitation aggregates as SUM, temperature as MEAN — don't conflate.
-- `ingest_weather` (short-range 16-day forecast) has no cron/worker service
-  yet — must be triggered manually via `railway ssh` until a scheduled
-  worker service is set up. If data looks stale/missing, check this first.
+- `ingest_weather` (short-range 16-day forecast), `fetch_seasonal`
+  (SEAS5), and `fetch_ec46` all have no cron/worker service yet — all
+  three must be triggered manually via `railway ssh` until a scheduled
+  worker service is set up. `fetch_seasonal.py`'s docstring says "Run
+  daily via Railway Cron" but no such cron exists in the actual Railway
+  project (confirmed via `railway status`) — don't trust that comment.
+  If data looks stale/missing, check this first.
 
 ## Performance patterns to maintain
 - Avoid duplicate DB round-trips across helper functions in the same view
@@ -123,22 +127,31 @@ DONE (verified live on production):
 - Revize: střednědobá (EC46) and dlouhodobá (SEAS5) buckets now do real
   revision comparisons (`_mlr_revision_context()` in views.py), same
   shape as aktuální but temp_mean directly (1.0 °C threshold, noisier
-  than aktuální's 0.5) and precip_probability delta in percentage points
-  ("pb"), not mm. Still falls back to the not_enough_data card correctly
-  when <2 snapshots exist. Tests: RevisionTrackerMlrBucketTest.
+  than aktuální's 0.5) and precip_prob_delta as a raw mm delta ("mm",
+  not "pb" — precip_probability is a documented placeholder field, it
+  stores the raw precip sum, not a real probability; label was wrong
+  in the first cut, fixed). Still falls back to the not_enough_data
+  card correctly when <2 snapshots exist. Tests: RevisionTrackerMlrBucketTest.
+- `fetch_ec46` management command added (mirrors `fetch_seasonal.py`),
+  requesting the pure EC46 ensemble mean explicitly via
+  `models=ecmwf_ec46_ensemble_mean` — confirmed live against the API
+  that `fetch_seasonal.py`'s SEAS5 call (no `models` param) actually
+  uses Open-Meteo's default "Seasonal Seamless" blend, which already
+  mixes EC46 into its first 46 days; this command isolates pure EC46
+  instead. `forecast_days=46` confirmed as EC46's real horizon (values
+  go null past day ~46 if you ask for more).
 
 NOT YET DONE / KNOWN BROKEN (going into next session):
-- No Railway cron/worker service yet for `ingest_weather` — still manual
-  via `railway ssh`. Needs a scheduled worker service set up.
-- Revize střednědobá/dlouhodobá buckets have the view/template built but
-  will show "zatím málo dat" until real snapshots exist. Verified via
-  `railway ssh` on 2026-07-13: EC46 has 0 distinct issued_at snapshots
-  (SEAS5 has 1). This isn't just "hasn't run twice yet" — there is NO
-  ingestion command for EC46 at all (`fetch_seasonal.py` only fetches
-  SEAS5; grepped the whole codebase, nothing else creates
-  `horizon="ec46"` rows). Needs a `fetch_ec46` command (or extending
-  `fetch_seasonal.py`) before that bucket can ever populate. SEAS5 just
-  needs a second `fetch_seasonal` run (any day) to unblock dlouhodobá.
+- No Railway cron/worker service yet for `ingest_weather` OR
+  `fetch_seasonal`/`fetch_ec46` — all three are manual-only via
+  `railway ssh` despite `fetch_seasonal.py`'s docstring claiming "Run
+  daily via Railway Cron" (confirmed via `railway status`: only the web
+  service + Postgres exist, no cron/worker resource at all — that line
+  was aspirational, not actual). Needs a real scheduled worker service.
+- Revize střednědobá needs `fetch_ec46` run at least twice (2 distinct
+  issued_at snapshots) before it shows real revisions — 1 run alone
+  still correctly renders not_enough_data. See status above for the
+  2026-07-13 verification numbers once run.
 
 ## Priority order (revised — Bod deprioritized, Revize + pins now ahead
 ## of remaining original Bod/detail polish items)
@@ -146,12 +159,12 @@ NOT YET DONE / KNOWN BROKEN (going into next session):
 1. **FÁZE 4 — stabilization** — DONE (PR #2): Historie custom-range year
    bug fixed, Bod accordion default-closed, minimal regression tests in
    notes/tests.py.
-2. **Revize expansion** — DONE (view/template): střednědobá (EC46) and
-   dlouhodobá (SEAS5) buckets now do real revision comparisons instead
-   of a hardcoded coming-soon card. Blocked on data, not code — see
-   NOT YET DONE above (no EC46 ingestion command exists yet, SEAS5 has
-   only 1 snapshot). Build the EC46 fetch command next to actually see
-   this bucket populate.
+2. **Revize expansion** — DONE (view + template + ingestion): střednědobá
+   (EC46) and dlouhodobá (SEAS5) buckets do real revision comparisons,
+   `fetch_ec46` command exists and has been run via `railway ssh`. Only
+   remaining gap is time — needs a 2nd `fetch_ec46`/`fetch_seasonal` run
+   on a later day before either bucket shows real deltas (see NOT YET
+   DONE above).
 3. **Historie "pin" annotations** (scoped-down from the original graph-pin
    idea — much lower risk than initially assessed):
    - Reuses the EXISTING manual-comparison form on Historie (od/do/roky/

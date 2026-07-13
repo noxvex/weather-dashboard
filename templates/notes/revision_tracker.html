@@ -123,7 +123,7 @@
                         <th>Předchozí Ø</th>
                         <th>Aktuální Ø</th>
                         <th>Změna</th>
-                        <th>Srážky pravděp. Δ</th>
+                        <th>Srážky Δ (mm, odhad)</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -149,7 +149,7 @@
                                 </td>
                                 <td>
                                     {% if r.precip_prob_delta is not None %}
-                                        {% if r.precip_prob_delta > 0 %}+{% endif %}{{ r.precip_prob_delta }}&thinsp;pb
+                                        {% if r.precip_prob_delta > 0 %}+{% endif %}{{ r.precip_prob_delta }}&thinsp;mm
                                     {% else %}—{% endif %}
                                 </td>
                             </tr>
