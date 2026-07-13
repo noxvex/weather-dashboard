@@ -910,6 +910,126 @@ def _historical_span(country=None, point_id=None, days=16, metric="t"):
     }
 
 
+_MLR_FORECAST_CACHE_KEY = "historie_mlr_forecast_rows"
+
+
+def _get_mlr_forecast_rows():
+    """
+    Future-dated temp rows from the latest EC46 snapshot plus the latest
+    SEAS5 snapshot, all points (callers filter by point/country), as plain
+    dicts. Cached for 1 hour like _get_seasonal_chart_data — the underlying
+    data changes at most once per day, and the raw fetch is cached rather
+    than any merged/aggregated result, which varies per point/granularity.
+    """
+    cached = cache.get(_MLR_FORECAST_CACHE_KEY)
+    if cached is not None:
+        return cached
+
+    today = date.today()
+    rows = []
+    for horizon in (MediumLongRangeForecast.HORIZON_EC46, MediumLongRangeForecast.HORIZON_SEAS5):
+        latest = (
+            MediumLongRangeForecast.objects
+            .filter(horizon=horizon)
+            .order_by("-issued_at")
+            .values_list("issued_at", flat=True)
+            .first()
+        )
+        if latest is None:
+            continue
+        rows += list(
+            MediumLongRangeForecast.objects
+            .filter(horizon=horizon, issued_at=latest,
+                    target_date__gte=today, temp_mean__isnull=False)
+            .values("point_id", "point__country", "target_date", "temp_mean", "horizon")
+            .order_by("target_date")
+        )
+    cache.set(_MLR_FORECAST_CACHE_KEY, rows, _CACHE_TTL)
+    return rows
+
+
+def _forecast_overlay_series(country=None, point_id=None, granularity="w", metric="t",
+                             doy_from=None, doy_to=None):
+    """
+    Forecast continuation of the current year for the Historie overlay,
+    aggregated to the same x axis and with the same averaging rules as
+    _historical_series (temp: mean of daily midpoints; precip weekly:
+    sum / distinct-point-count; precip daily: avg across points).
+
+    Temperature merges three sources per date — short-range 16-day
+    DailyForecast wins on overlap, then EC46, then SEAS5 (temp_mean).
+    Precipitation uses the short range only: MediumLongRangeForecast has
+    just precip_probability, which isn't comparable to mm sums.
+
+    Dates past the current (ISO) year are dropped — their x would wrap
+    around to 1 and corrupt the overlay. Returns [{x, value}] sorted by x.
+    """
+    today = date.today()
+
+    def wanted(pid, pcountry):
+        if point_id is not None:
+            return pid == point_id
+        if country is not None:
+            return pcountry == country
+        return True
+
+    # Per-source {date: {point_id: daily value}} maps, in priority order.
+    short_map = defaultdict(dict)
+    short_rows, _ = _get_latest_short_rows()
+    # Two ingests on the same day share a batch date — sort by issued_at so
+    # the newest snapshot's value wins for a duplicated (point, date).
+    for r in sorted(short_rows, key=lambda r: r.issued_at):
+        if r.forecast_date < today or not wanted(r.point_id, r.point.country):
+            continue
+        if metric == "p":
+            if r.precipitation_sum is not None:
+                short_map[r.forecast_date][r.point_id] = r.precipitation_sum
+        elif r.temperature_min is not None and r.temperature_max is not None:
+            short_map[r.forecast_date][r.point_id] = (r.temperature_min + r.temperature_max) / 2.0
+
+    sources = [short_map]
+    if metric == "t":
+        ec46_map, seas5_map = defaultdict(dict), defaultdict(dict)
+        for r in _get_mlr_forecast_rows():
+            if not wanted(r["point_id"], r["point__country"]):
+                continue
+            target = ec46_map if r["horizon"] == MediumLongRangeForecast.HORIZON_EC46 else seas5_map
+            target[r["target_date"]][r["point_id"]] = r["temp_mean"]
+        sources += [ec46_map, seas5_map]
+
+    merged = {}
+    for src in sources:
+        for d, pts in src.items():
+            merged.setdefault(d, pts)
+
+    if granularity == "d":
+        def x_of(d): return d.timetuple().tm_yday  # matches EXTRACT(DOY ...)
+        def in_current_year(d): return d.year == today.year
+    else:
+        def x_of(d): return d.isocalendar()[1]     # matches ExtractWeek (ISO)
+        def in_current_year(d): return d.isocalendar()[0] == today.isocalendar()[0]
+
+    buckets = defaultdict(list)  # x → [(point_id, value)]
+    for d, pts in merged.items():
+        if not in_current_year(d):
+            continue
+        x = x_of(d)
+        if doy_from is not None and doy_to is not None and not (doy_from <= x <= doy_to):
+            continue
+        buckets[x].extend(pts.items())
+
+    series = []
+    for x in sorted(buckets):
+        pairs = buckets[x]
+        vals = [v for _, v in pairs]
+        if metric == "p" and granularity != "d":
+            value = sum(vals) / len({pid for pid, _ in pairs})
+        else:
+            value = sum(vals) / len(vals)
+        series.append({"x": x, "value": round(value, 1)})
+    return series
+
+
 ROZSAH_DAYS = {"kratka": 16, "stredni": 120, "dlouha": 214}
 
 
@@ -1031,20 +1151,43 @@ def historie(request):
                     for x, v in zip(s["x"], s["values"])
                 ]
 
+        # Dashed forecast continuation of the current year — abs mode only
+        # (pct deviations need a climatology row per x, which future dates
+        # don't have). Skipped when the current year has no real rows in the
+        # selected slice: there'd be no trace to visually continue from.
+        if rezim == "abs" and current_year in by_year:
+            fc = _forecast_overlay_series(
+                country=country, point_id=point_id, granularity=gran, metric=metric,
+                doy_from=doy_from if rozsah == "vlastni" else None,
+                doy_to=doy_to if rozsah == "vlastni" else None,
+            )
+            cur = by_year[current_year]
+            real_x = set(cur["x"])
+            fc = [p for p in fc if p["x"] not in real_x]
+            if fc:
+                # Prepend the last real point so the dashed segment connects
+                # to the real trace with no visual gap.
+                cur["forecast_x"] = [cur["x"][-1]] + [p["x"] for p in fc]
+                cur["forecast_values"] = [cur["values"][-1]] + [p["value"] for p in fc]
+
+        def _year_entry(y, s):
+            entry = {
+                "year": y,
+                "x": s["x"],
+                "values": s["values"],
+                "name": f"{y} · {s['sim']} %" if s.get("sim") is not None else str(y),
+            }
+            if "forecast_x" in s:
+                entry["forecast_x"] = s["forecast_x"]
+                entry["forecast_values"] = s["forecast_values"]
+            return entry
+
         chart = {
             "mode": "overlay",
             "granularity": gran,
             "metric": metric,
             "rezim": rezim,
-            "years": [
-                {
-                    "year": y,
-                    "x": s["x"],
-                    "values": s["values"],
-                    "name": f"{y} · {s['sim']} %" if s.get("sim") is not None else str(y),
-                }
-                for y, s in sorted(by_year.items())
-            ],
+            "years": [_year_entry(y, s) for y, s in sorted(by_year.items())],
         }
         if rozsah == "vlastni":
             chart["all_visible"] = True

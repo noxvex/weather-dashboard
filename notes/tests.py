@@ -7,10 +7,11 @@ import re
 from datetime import date, timedelta
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import TestCase
 from django.utils import timezone
 
-from ingest.models import DailyForecast, HistoricalActual, WeatherPoint
+from ingest.models import DailyForecast, HistoricalActual, MediumLongRangeForecast, WeatherPoint
 from notes.templatetags.weather_tags import fc_fill_style
 
 User = get_user_model()
@@ -91,6 +92,124 @@ class HistorieVlastniRozsahTest(TestCase):
         self.assertEqual(counts, sorted(counts))  # non-decreasing as the window widens
         self.assertLess(counts[0], counts[1])
         self.assertLess(counts[1], counts[2])
+
+
+class HistorieForecastOverlayTest(TestCase):
+    """
+    Dashed forecast continuation of the current year on the Historie overlay:
+    temperature merges short-range + EC46 + SEAS5 (in that priority),
+    precipitation must stay short-range only, pct mode gets nothing, and the
+    first forecast point repeats the last real one so the line connects.
+    """
+
+    def setUp(self):
+        # The MediumLongRangeForecast fetch is cached for 1 hour (LocMemCache
+        # survives across tests in-process) — clear per test or fixtures from
+        # a previous method would leak into this one.
+        cache.clear()
+        self.user = User.objects.create_user(username="tester4", password="x")
+        self.client.force_login(self.user)
+        self.point = WeatherPoint.objects.create(
+            name="Testovec", region="Test", country="CZ", latitude=50.0, longitude=15.0,
+        )
+        self.today = date.today()
+        # Real ERA5 rows up to today (current year only — a January run must
+        # not create rows that belong to the previous year's trace).
+        for offset in range(5, -1, -1):
+            d = self.today - timedelta(days=offset)
+            if d.year == self.today.year:
+                HistoricalActual.objects.create(
+                    point=self.point, date=d, temp_min=10.0, temp_max=20.0, precip_mm=2.0,
+                )
+
+    def tearDown(self):
+        cache.clear()
+
+    def _make_short_forecasts(self):
+        """Short-range rows today..today+3, temp midpoint 17.0, precip 3.0."""
+        issued_at = timezone.now()
+        for offset in range(4):
+            DailyForecast.objects.create(
+                point=self.point, forecast_date=self.today + timedelta(days=offset),
+                horizon=DailyForecast.HORIZON_SHORT, issued_at=issued_at,
+                temperature_min=12.0, temperature_max=22.0, precipitation_sum=3.0,
+            )
+
+    def _make_mlr_forecasts(self):
+        """
+        EC46 overlapping the short range (today+2, 99.0 — must lose to short)
+        and beyond it (today+20, 18.0); SEAS5 on the same far date (5.0 —
+        must lose to EC46) and further out (today+40, 6.0).
+        """
+        issued_at = timezone.now()
+        for offset, temp in [(2, 99.0), (20, 18.0)]:
+            MediumLongRangeForecast.objects.create(
+                point=self.point, target_date=self.today + timedelta(days=offset),
+                issued_at=issued_at, horizon=MediumLongRangeForecast.HORIZON_EC46,
+                temp_mean=temp, precip_probability=80.0,
+            )
+        for offset, temp in [(20, 5.0), (40, 6.0)]:
+            MediumLongRangeForecast.objects.create(
+                point=self.point, target_date=self.today + timedelta(days=offset),
+                issued_at=issued_at, horizon=MediumLongRangeForecast.HORIZON_SEAS5,
+                temp_mean=temp, precip_probability=80.0,
+            )
+
+    def _get(self, **extra):
+        params = {"bod": self.point.pk, "rozsah": "plna", "g": "d", "m": "t"}
+        params.update(extra)
+        return self.client.get("/historie/", params)
+
+    def _current_entry(self, resp):
+        years = resp.context["chart_json"]["years"]
+        return next(y for y in years if y["year"] == self.today.year)
+
+    def _doy(self, d):
+        return d.timetuple().tm_yday
+
+    def test_forecast_keys_present_with_short_range_data(self):
+        self._make_short_forecasts()
+        entry = self._current_entry(self._get())
+        self.assertIn("forecast_x", entry)
+        self.assertIn("forecast_values", entry)
+        self.assertGreater(len(entry["forecast_x"]), 1)
+
+    def test_forecast_keys_absent_without_forecast_data(self):
+        entry = self._current_entry(self._get())
+        self.assertNotIn("forecast_x", entry)
+        self.assertNotIn("forecast_values", entry)
+
+    def test_forecast_connects_to_last_real_point(self):
+        self._make_short_forecasts()
+        entry = self._current_entry(self._get())
+        self.assertEqual(entry["forecast_x"][0], entry["x"][-1])
+        self.assertEqual(entry["forecast_values"][0], entry["values"][-1])
+
+    def test_temp_merges_all_sources_with_short_range_priority(self):
+        self._make_short_forecasts()
+        self._make_mlr_forecasts()
+        entry = self._current_entry(self._get(m="t"))
+        by_x = dict(zip(entry["forecast_x"], entry["forecast_values"]))
+        # Short range wins over EC46's 99.0 on the overlapping date
+        self.assertEqual(by_x[self._doy(self.today + timedelta(days=2))], 17.0)
+        # EC46 wins over SEAS5's 5.0 beyond the short range
+        self.assertEqual(by_x[self._doy(self.today + timedelta(days=20))], 18.0)
+        # SEAS5 fills dates only it covers
+        self.assertEqual(by_x[self._doy(self.today + timedelta(days=40))], 6.0)
+
+    def test_precip_never_pulls_medium_long_range(self):
+        self._make_short_forecasts()
+        self._make_mlr_forecasts()
+        entry = self._current_entry(self._get(m="p"))
+        # Nothing beyond the last short-range date (today+3), even though
+        # EC46/SEAS5 fixtures exist at today+20 and today+40
+        self.assertLessEqual(max(entry["forecast_x"]), self._doy(self.today + timedelta(days=3)))
+
+    def test_pct_mode_never_attaches_forecast(self):
+        self._make_short_forecasts()
+        entry = self._current_entry(self._get(rezim="pct"))
+        self.assertNotIn("forecast_x", entry)
+        self.assertNotIn("forecast_values", entry)
 
 
 class PointDetailBranchSeparationTest(TestCase):
