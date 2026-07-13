@@ -634,6 +634,15 @@ def point_detail(request):
     r_horizont = request.GET.get("r_horizont", "")
     r_zeme = request.GET.get("r_zeme", "")
 
+    # ── Forecast table day count (?pd=) — restricted to the offered options ──
+    FORECAST_DAY_OPTIONS = [3, 7, 14, 16]
+    try:
+        forecast_days = int(request.GET.get("pd", 7))
+    except (ValueError, TypeError):
+        forecast_days = 7
+    if forecast_days not in FORECAST_DAY_OPTIONS:
+        forecast_days = 7
+
     def _filter_reports(base_qs):
         qs = _apply_time_filter(base_qs, r_rozsah)
         qs = _apply_horizon_filter(qs, r_horizont)
@@ -686,6 +695,7 @@ def point_detail(request):
             "custom_active": False, "custom_chart": {"kind": None},
             "custom_year": None, "custom_week": None,
             "min_custom_year": min_custom_year, "max_custom_year": max_custom_year,
+            "forecast_days": forecast_days, "forecast_day_options": FORECAST_DAY_OPTIONS,
         })
 
     # ── City selection via ?bod=<id>, default to first point ──
@@ -719,9 +729,10 @@ def point_detail(request):
         today_matches = [r for r in all_rows if r.forecast_date == today]
         today_row = today_matches[0] if today_matches else None
 
-        # 7-day table starting from today (or nearest future date)
+        # Table starting from today (or nearest future date), capped to the
+        # requested day count and to however many days are actually available.
         future_rows = [r for r in all_rows if r.forecast_date >= today]
-        forecast_rows = future_rows[:7]
+        forecast_rows = future_rows[:forecast_days]
 
         # Full 16-day chart series
         chart_json = {
@@ -824,6 +835,8 @@ def point_detail(request):
         "custom_week": custom_week,
         "min_custom_year": min_custom_year,
         "max_custom_year": max_custom_year,
+        "forecast_days": forecast_days,
+        "forecast_day_options": FORECAST_DAY_OPTIONS,
     })
 
 

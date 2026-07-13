@@ -146,32 +146,32 @@
 {# ═══════════════════════════════════════════════════════ #}
 {% else %}
 
-{# ── Hero: single point ── #}
-<div class="hero">
-    <div class="hero-label">{{ selected.name|upper }} · {{ selected.country }} · DNES</div>
-    <div class="hero-num">
-        {% if today_row and today_row.temperature_max is not None %}{{ today_row.temperature_max|temp_round }}°{% else %}—{% endif %}
-    </div>
-    <div class="hero-cond">
-        {% if today_row %}
-            {% if today_row.weather_code is not None %}{{ today_row.weather_code|weather_icon }}{% endif %}
-            {% if today_row.temperature_min is not None %}min {{ today_row.temperature_min|temp_round }}°{% endif %}
-            {% if today_row.wind_speed_max is not None %}· vítr {{ today_row.wind_speed_max|floatformat:0 }} km/h{% endif %}
-            {% if today_row.precipitation_sum is not None %}· {{ today_row.precipitation_sum }} mm srážek{% endif %}
-        {% else %}
-            Dnešní data zatím nejsou k dispozici
-        {% endif %}
-    </div>
-</div>
-
 {# ── Two halves: forecast + reports left, chart + revisions right ── #}
 <div class="bod-grid">
 <div>
 
-{# ── 7-day forecast table ── #}
+{# ── Forecast table, day count selectable via ?pd= ── #}
+<form id="forecast-days-filter" method="get" style="display:none;">
+    {% if request.GET.bod %}<input type="hidden" name="bod" value="{{ request.GET.bod }}">{% endif %}
+    <input type="hidden" name="r_rozsah" value="{{ r_rozsah }}">
+    <input type="hidden" name="r_horizont" value="{{ r_horizont }}">
+    <input type="hidden" name="r_zeme" value="{{ r_zeme }}">
+    {% if custom_year %}<input type="hidden" name="custom_year" value="{{ custom_year }}">{% endif %}
+    {% if custom_week %}<input type="hidden" name="custom_week" value="{{ custom_week }}">{% endif %}
+    <input type="hidden" name="pd" id="pd-input" value="{{ forecast_days }}">
+</form>
+
 {% if forecast_rows %}
 <div class="card">
-    <div class="card-title">Předpověď · 7 dní</div>
+    <div class="card-title">
+        <span>Předpověď <span class="hint">{{ forecast_rows|length }} dní</span></span>
+        <span>
+            {% for n in forecast_day_options %}
+            <button type="button" class="mode-btn{% if forecast_days == n %} active{% endif %}"
+                    onclick="setForecastDays({{ n }})">{{ n }}</button>
+            {% endfor %}
+        </span>
+    </div>
     {% for row in forecast_rows %}
         {% with t_min=row.temperature_min|default:0 t_max=row.temperature_max|default:0 %}
         <div class="fc-row">
@@ -295,6 +295,12 @@
 
 {% block extra_js %}
 {% if not selected_land %}
+<script>
+function setForecastDays(n) {
+    document.getElementById('pd-input').value = n;
+    document.getElementById('forecast-days-filter').submit();
+}
+</script>
 {{ chart_json|json_script:"point-chart-data" }}
 {{ mid_chart|json_script:"point-mid-data" }}
 {{ long_chart|json_script:"point-long-data" }}
