@@ -36,8 +36,10 @@ Repo: `noxvex/weather-dashboard` (public). Live: `weather-dashboard-production-6
    approval (confirmed: github.com/anthropics/claude-code/issues/22636).
    Don't fight this — work with it: at the end of every phase, after
    committing and pushing to a feature/worktree branch, ALWAYS run
-   `gh pr create --fill` then `gh pr merge --squash --delete-branch --auto`
-   yourself (gh CLI is authenticated as noxvex). Never leave a phase's
+   `gh pr create --fill` then `gh pr merge --squash --delete-branch`
+   yourself (gh CLI is authenticated as noxvex; do NOT pass `--auto` —
+   auto-merge is disabled in this repo's GitHub settings and the flag
+   fails with a GraphQL error). Never leave a phase's
    work sitting unmerged on a branch — it will NOT reach Railway (which
    only deploys from `main`) until merged. Confirm after merging with
    `git log origin/main --oneline -3` that the commit actually landed
@@ -99,7 +101,7 @@ DONE (verified live on production):
   (still no scheduled cron/worker service — see NEXT UP)
 - gh CLI authenticated (noxvex) — Claude Code's built-in Git Safety
   Protocol blocks direct push to main; workflow is now: feature branch →
-  `gh pr create --fill` → `gh pr merge --squash --delete-branch --auto`
+  `gh pr create --fill` → `gh pr merge --squash --delete-branch`
   (documented in workflow rules above)
 - FÁZE 4 stabilization (PR #2): Historie custom-range `current_year`
   anchor fixed (determined independently of the doy filter), Bod CZ/SK
