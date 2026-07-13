@@ -88,7 +88,12 @@ DONE: horizon colors + readability (badges, borders, delta %), Bod page
 CZ/SK country selector with expandable city lists, Aktuality/Bod filters
 (time range, horizon, country), DB indexes, seasonal-data caching, shared
 query helpers in `aktuality()`, fixed multiline-comment bug, migrated
-Postgres to Netherlands region to match web service.
+Postgres to Netherlands region to match web service. ERA5 historical
+backfill extended from 2 years to 2015-01-01 (was 2 years) — 92,554
+HistoricalActual rows across all 22 points as of 2026-07-13; the
+archive-api free tier rate-limits hard around ~150 requests per run, so
+a full re-backfill needs 2-3 passes (safe/idempotent via
+`ignore_conflicts=True`) rather than one shot.
 
 NEXT UP (original roadmap order): Bod/detail page — larger temperature
 numbers, clarify the unlabeled "bar" element's purpose, selectable forecast
