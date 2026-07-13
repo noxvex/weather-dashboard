@@ -90,21 +90,75 @@
         </div>
     {% endif %}
 
-{# ── Střednědobá / Dlouhodobá — coming soon ── #}
-{% else %}
-    <div class="coming-soon">
-        <span class="cs-icon">🗂</span>
-        <h3>Data se sbírají</h3>
-        <p>
-            {% if bucket == "strednedobe" %}
-                Střednědobá revizní data (SEAS5, EC46) se sbírají od tohoto updatu.
-            {% else %}
-                Dlouhodobá revizní data se sbírají od tohoto updatu.
-            {% endif %}
-            Zobrazení bude dostupné jakmile budou k dispozici alespoň dva snímky.
-            Jde o záměr — data <em>jsou</em> sbírána, UI přichází brzy.
-        </p>
-    </div>
+{# ── Střednědobá (EC46) / Dlouhodobá (SEAS5) — same table shape, mean not max ── #}
+{% elif bucket == "strednedobe" or bucket == "dlouhodobe" %}
+    {% if not_enough_data %}
+        <div class="coming-soon">
+            <span class="cs-icon">🗂</span>
+            <h3>Zatím málo dat</h3>
+            <p>
+                {% if bucket == "strednedobe" %}
+                    Střednědobá revizní data (EC46) se sbírají od tohoto updatu.
+                {% else %}
+                    Dlouhodobá revizní data (SEAS5) se sbírají od tohoto updatu.
+                {% endif %}
+                Pro zobrazení revizí jsou potřeba alespoň dva snímky předpovědi.
+                Zobrazení bude dostupné jakmile budou k dispozici.
+            </p>
+        </div>
+    {% else %}
+        <div class="rev-meta">
+            Srovnání snímků:
+            <strong>{{ previous_batch|date:"j. n." }}</strong> →
+            <strong>{{ latest_batch|date:"j. n." }}</strong>
+            &nbsp;·&nbsp; Zobrazeny odchylky ≥ 1,0 °C
+        </div>
+
+        <div class="card" style="padding:0; overflow:hidden;">
+            <table class="rev-table">
+                <thead>
+                    <tr>
+                        <th>Země</th>
+                        <th>Datum předpovědi</th>
+                        <th>Předchozí Ø</th>
+                        <th>Aktuální Ø</th>
+                        <th>Změna</th>
+                        <th>Srážky pravděp. Δ</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if not revisions %}
+                        <tr><td colspan="6" class="no-data-row">Žádné významné změny mezi posledními dvěma snímky.</td></tr>
+                    {% else %}
+                        {% for r in revisions %}
+                            <tr>
+                                <td><span class="country-chip">{{ r.country }}</span></td>
+                                <td>{{ r.date|date:"j. n." }}</td>
+                                <td>{% if r.temp_prev is not None %}{{ r.temp_prev }}&thinsp;°C{% else %}—{% endif %}</td>
+                                <td>{% if r.temp_latest is not None %}{{ r.temp_latest }}&thinsp;°C{% else %}—{% endif %}</td>
+                                <td>
+                                    {% if r.temp_delta is not None %}
+                                        {% if r.temp_delta > 0 %}
+                                            <span class="delta-pos">+{{ r.temp_delta }}&thinsp;°C{% if r.temp_pct %}<br><small>(+{{ r.temp_pct }}&thinsp;%)</small>{% endif %}</span>
+                                        {% elif r.temp_delta < 0 %}
+                                            <span class="delta-neg">{{ r.temp_delta }}&thinsp;°C{% if r.temp_pct %}<br><small>({{ r.temp_pct }}&thinsp;%)</small>{% endif %}</span>
+                                        {% else %}
+                                            <span class="delta-zero">0&thinsp;°C</span>
+                                        {% endif %}
+                                    {% else %}—{% endif %}
+                                </td>
+                                <td>
+                                    {% if r.precip_prob_delta is not None %}
+                                        {% if r.precip_prob_delta > 0 %}+{% endif %}{{ r.precip_prob_delta }}&thinsp;pb
+                                    {% else %}—{% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
 {% endif %}
 
 {% endblock %}
