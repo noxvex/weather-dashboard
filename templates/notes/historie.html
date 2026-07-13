@@ -179,16 +179,34 @@ function histSubmit(form) {
         };
     }
 
-    const traces = raw.years.map((yr, i) => {
+    const traces = [];
+    const traceMeta = [];  // parallel to traces — feeds the setHistMode restyle arrays
+    raw.years.forEach((yr, i) => {
         const s = styleFor('a', yr, i);
-        return {
+        const vis = raw.all_visible ? true : ((currentYear - yr.year <= 5) ? true : 'legendonly');
+        traces.push({
             x: yr.x, y: yr.values,
             type: 'scatter', mode: 'lines', name: yr.name,
             line: { color: s.color, width: s.width, shape: daily ? 'linear' : 'spline' },
             opacity: s.opacity,
-            visible: raw.all_visible ? true : ((currentYear - yr.year <= 5) ? true : 'legendonly'),
+            visible: vis,
             hovertemplate: '%{y:.1f}' + unit + '<extra>' + yr.name + '</extra>',
-        };
+        });
+        traceMeta.push({ yr: yr, i: i });
+        // Dashed forecast continuation — server attaches it only to the
+        // current year in abs mode; first point repeats the last real one
+        if (yr.year === currentYear && yr.forecast_x && yr.forecast_x.length) {
+            traces.push({
+                x: yr.forecast_x, y: yr.forecast_values,
+                type: 'scatter', mode: 'lines', name: yr.name,
+                line: { color: s.color, width: s.width, dash: 'dot', shape: daily ? 'linear' : 'spline' },
+                opacity: s.opacity,
+                visible: vis,
+                showlegend: false,
+                hovertemplate: '%{y:.1f}' + unit + '<extra>' + yr.name + ' (predikce)</extra>',
+            });
+            traceMeta.push({ yr: yr, i: i });
+        }
     });
 
     const layout = Object.assign({}, baseLayout, {
@@ -201,9 +219,11 @@ function histSubmit(form) {
     });
 
     window.setHistMode = function (mode) {
+        // Iterate traceMeta, not raw.years — the forecast trace must get the
+        // same restyle values as its real counterpart (dash stays untouched)
         const colors = [], widths = [], opacities = [];
-        raw.years.forEach((yr, i) => {
-            const s = styleFor(mode, yr, i);
+        traceMeta.forEach(t => {
+            const s = styleFor(mode, t.yr, t.i);
             colors.push(s.color); widths.push(s.width); opacities.push(s.opacity);
         });
         Plotly.restyle('hist-chart', { 'line.color': colors, 'line.width': widths, 'opacity': opacities });

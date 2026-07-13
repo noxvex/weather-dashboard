@@ -84,21 +84,77 @@ Repo: `noxvex/weather-dashboard` (public). Live: `weather-dashboard-production-6
   is wide
 
 ## Current status (update this section as phases complete)
-DONE: horizon colors + readability (badges, borders, delta %), Bod page
-CZ/SK country selector with expandable city lists, Aktuality/Bod filters
-(time range, horizon, country), DB indexes, seasonal-data caching, shared
-query helpers in `aktuality()`, fixed multiline-comment bug, migrated
-Postgres to Netherlands region to match web service. ERA5 historical
-backfill extended from 2 years to 2015-01-01 (was 2 years) — 92,554
-HistoricalActual rows across all 22 points as of 2026-07-13; the
-archive-api free tier rate-limits hard around ~150 requests per run, so
-a full re-backfill needs 2-3 passes (safe/idempotent via
-`ignore_conflicts=True`) rather than one shot.
+DONE (verified live on production):
+- Horizon colors + readability (badges, borders, delta % everywhere)
+- Bod page CZ/SK country selector with expandable city lists
+- Aktuality/Bod filters (time range, horizon, country)
+- DB indexes (WeatherPoint.country, HistoricalActual, DailyForecast,
+  MediumLongRangeForecast) + seasonal-data caching + shared query helpers
+- Fixed multiline Django comment bug (was rendering as visible text)
+- Migrated Postgres to Netherlands region to match web service (was
+  cross-region US↔EU, caused ~140ms latency per query)
+- Fixed hardcoded fc-fill temperature bar (now reflects real min/max)
+- Added 4th "Vlastní" (custom year/week) tab to Bod's horizon switcher
+- `ingest_weather` confirmed working when run manually via `railway ssh`
+  (still no scheduled cron/worker service — see NEXT UP)
+- gh CLI authenticated (noxvex) — Claude Code's built-in Git Safety
+  Protocol blocks direct push to main; workflow is now: feature branch →
+  `gh pr create --fill` → `gh pr merge --squash --delete-branch --auto`
+  (documented in workflow rules above)
+- FÁZE 4 stabilization (PR #2): Historie custom-range `current_year`
+  anchor fixed (determined independently of the doy filter), Bod CZ/SK
+  accordions default to closed, first regression tests in notes/tests.py
+  (historie custom-range year filtering, point_detail routing, fc-fill)
+- ERA5 historical backfill extended to 2015-01-01 (was 2 years) — 92,554
+  HistoricalActual rows across all 22 points as of 2026-07-13; the
+  archive-api free tier rate-limits hard around ~150 requests per run, so
+  a full re-backfill needs 2-3 passes (safe/idempotent via
+  `ignore_conflicts=True`) rather than one shot.
+- Historie: current-year overlay continues as a dashed forecast segment
+  (temp: short 16-day + EC46 + SEAS5 merged per date, short wins on
+  overlap, then EC46; precip: short-range only — MLR has just
+  precip_probability). Works in plna + vlastni, abs mode only (skipped
+  for rezim=pct). Raw MLR fetch cached 1h (`_get_mlr_forecast_rows`);
+  aggregation mirrors `_historical_series` rules. Note: ERA5 lags ~5
+  days behind today, so the dashed connector visibly bridges that gap —
+  expected, not a bug. Tests: HistorieForecastOverlayTest.
 
-NEXT UP (original roadmap order): Bod/detail page — larger temperature
-numbers, clarify the unlabeled "bar" element's purpose, selectable forecast
-horizon instead of fixed 7 days, labels above % change indicators, resize
-current-weather vs. forecast sections, scrollable expectations table,
-reconsider graph zoom interaction. Then: Historie (monthly granularity,
-multi-year average curve), data expansion (pollen/AQ/UV/wind/pressure),
-toggleable display layers, graph annotations, mobile — in that order.
+NOT YET DONE / KNOWN BROKEN (going into next session):
+- No Railway cron/worker service yet for `ingest_weather` — still manual
+  via `railway ssh`. Needs a scheduled worker service set up.
+
+## Priority order (revised — Bod deprioritized, Revize + pins now ahead
+## of remaining original Bod/detail polish items)
+
+1. **FÁZE 4 — stabilization** — DONE (PR #2): Historie custom-range year
+   bug fixed, Bod accordion default-closed, minimal regression tests in
+   notes/tests.py.
+2. **Revize expansion** — currently only shows the nearest day or two
+   for CZ. Needs to cover the full available future range (short-range
+   16 days + medium-range), not just tomorrow — this is more useful for
+   the marketing team's actual planning horizon than Bod page detail work.
+3. **Historie "pin" annotations** (scoped-down from the original graph-pin
+   idea — much lower risk than initially assessed):
+   - Reuses the EXISTING manual-comparison form on Historie (od/do/roky/
+     bod/metric) — no new pixel-click-on-graph interaction needed
+   - User configures a comparison (date range, years, metric: temp abs/%,
+     precipitation; air quality metric later once that data exists)
+   - "Add pin" button saves it as a Note (existing model) tagged with
+     those parameters + author name, default pre-filled comment text
+     ("Kouknětě na tyhle data...", user edits it)
+   - Pin appears on the Historie graph itself (marker/annotation, NOT a
+     live embedded chart) and optionally cross-posts to Aktuality feed
+     as a note with a deep link back to Historie with those exact params
+   - Aktuality card shows TEXT SUMMARY only (e.g. "Duben–červenec,
+     posledních 5 let, průměr 18°C") — no embedded graph in the feed,
+     keep it simple first
+4. Remaining original "Bod/detail" polish (larger temp numbers, resize
+   sections, scrollable table) — lower priority now, Bod itself matters
+   less than short/medium-range change tracking per user's actual usage
+5. Data expansion (pollen, air quality — distinguish gases/dust/pollen,
+   UV, wind days, pressure) — unblocks air-quality as a pin metric later
+6. Toggleable display layers
+7. Mobile tweaks — last
+
+Session B (not started): SMTP email, anomaly detection (medium-range
+forecast vs. ERA5 baseline), daily 9:00 Prague digest with opt-in.
