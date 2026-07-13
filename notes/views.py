@@ -478,10 +478,13 @@ def _mlr_revision_context(horizon, threshold):
     """
     Same shape as the aktuální branch below, but for a MediumLongRangeForecast
     horizon (EC46/SEAS5): compares the 2 most recent issued_at snapshots per
-    (country, target_date) using temp_mean directly (no max/min to split) and
-    precip_probability (percentage points, not mm). Returns a dict to merge
-    into the view context — either {"revisions", "latest_batch",
-    "previous_batch"} or {"revisions": [], "not_enough_data": True}.
+    (country, target_date) using temp_mean directly (no max/min to split).
+    precip_prob_delta is a delta of the RAW mm sum stored in the
+    precip_probability field, not a real probability — Open-Meteo's seasonal
+    API has no true precip-probability variable; see the comment in
+    fetch_seasonal.py (and fetch_ec46.py) for why that field holds mm.
+    Returns a dict to merge into the view context — either {"revisions",
+    "latest_batch", "previous_batch"} or {"revisions": [], "not_enough_data": True}.
     """
     today = date.today()
 
