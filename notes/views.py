@@ -474,9 +474,76 @@ def note_pin(request, pk):
 
 # ── Revision tracker ────────────────────────────────────────────────────────
 
+def _mlr_revision_context(horizon, threshold):
+    """
+    Same shape as the aktuální branch below, but for a MediumLongRangeForecast
+    horizon (EC46/SEAS5): compares the 2 most recent issued_at snapshots per
+    (country, target_date) using temp_mean directly (no max/min to split) and
+    precip_probability (percentage points, not mm). Returns a dict to merge
+    into the view context — either {"revisions", "latest_batch",
+    "previous_batch"} or {"revisions": [], "not_enough_data": True}.
+    """
+    today = date.today()
+
+    batch_dates = list(
+        MediumLongRangeForecast.objects
+        .filter(horizon=horizon)
+        .order_by("-issued_at")
+        .values_list("issued_at", flat=True)
+        .distinct()[:14]
+    )
+    if len(batch_dates) < 2:
+        return {"revisions": [], "not_enough_data": True}
+
+    latest, previous = batch_dates[0], batch_dates[1]
+
+    def get_nat_series(batch_dt, country):
+        rows = list(
+            MediumLongRangeForecast.objects.filter(
+                horizon=horizon, issued_at=batch_dt, point__country=country,
+                target_date__gte=today,
+            )
+        )
+        by_date = defaultdict(list)
+        for r in rows:
+            by_date[r.target_date].append(r)
+        return {
+            fd: {"temp_mean": _avg(day_rows, "temp_mean"), "precip_prob": _avg(day_rows, "precip_probability")}
+            for fd, day_rows in sorted(by_date.items())
+        }
+
+    revisions = []
+    for country, label in [("CZ", "ČR"), ("SK", "SR")]:
+        latest_series = get_nat_series(latest, country)
+        prev_series = get_nat_series(previous, country)
+        for fd in sorted(latest_series):
+            if fd not in prev_series:
+                continue
+            lt = latest_series[fd]["temp_mean"]
+            pt = prev_series[fd]["temp_mean"]
+            lp = latest_series[fd]["precip_prob"]
+            pp = prev_series[fd]["precip_prob"]
+            temp_delta = round(lt - pt, 1) if lt is not None and pt is not None else None
+            precip_prob_delta = round(lp - pp) if lp is not None and pp is not None else None
+            if temp_delta is not None and abs(temp_delta) >= threshold:
+                revisions.append({
+                    "country": label,
+                    "date": fd,
+                    "temp_latest": lt,
+                    "temp_prev": pt,
+                    "temp_delta": temp_delta,
+                    "temp_pct": _temp_pct(temp_delta, pt),
+                    "precip_prob_delta": precip_prob_delta,
+                })
+
+    return {"revisions": revisions, "latest_batch": latest, "previous_batch": previous}
+
+
 @login_required
 def revision_tracker(request):
     bucket = request.GET.get("rozsah", "aktualni")
+    if bucket not in ("aktualni", "strednedobe", "dlouhodobe"):
+        bucket = "aktualni"
     context = {"bucket": bucket}
 
     if bucket == "aktualni":
@@ -540,6 +607,12 @@ def revision_tracker(request):
         else:
             context["revisions"] = []
             context["not_enough_data"] = True
+
+    elif bucket == "strednedobe":
+        context.update(_mlr_revision_context(MediumLongRangeForecast.HORIZON_EC46, threshold=1.0))
+
+    elif bucket == "dlouhodobe":
+        context.update(_mlr_revision_context(MediumLongRangeForecast.HORIZON_SEAS5, threshold=1.0))
 
     return render(request, "notes/revision_tracker.html", context)
 

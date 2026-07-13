@@ -120,10 +120,25 @@ DONE (verified live on production):
   aggregation mirrors `_historical_series` rules. Note: ERA5 lags ~5
   days behind today, so the dashed connector visibly bridges that gap —
   expected, not a bug. Tests: HistorieForecastOverlayTest.
+- Revize: střednědobá (EC46) and dlouhodobá (SEAS5) buckets now do real
+  revision comparisons (`_mlr_revision_context()` in views.py), same
+  shape as aktuální but temp_mean directly (1.0 °C threshold, noisier
+  than aktuální's 0.5) and precip_probability delta in percentage points
+  ("pb"), not mm. Still falls back to the not_enough_data card correctly
+  when <2 snapshots exist. Tests: RevisionTrackerMlrBucketTest.
 
 NOT YET DONE / KNOWN BROKEN (going into next session):
 - No Railway cron/worker service yet for `ingest_weather` — still manual
   via `railway ssh`. Needs a scheduled worker service set up.
+- Revize střednědobá/dlouhodobá buckets have the view/template built but
+  will show "zatím málo dat" until real snapshots exist. Verified via
+  `railway ssh` on 2026-07-13: EC46 has 0 distinct issued_at snapshots
+  (SEAS5 has 1). This isn't just "hasn't run twice yet" — there is NO
+  ingestion command for EC46 at all (`fetch_seasonal.py` only fetches
+  SEAS5; grepped the whole codebase, nothing else creates
+  `horizon="ec46"` rows). Needs a `fetch_ec46` command (or extending
+  `fetch_seasonal.py`) before that bucket can ever populate. SEAS5 just
+  needs a second `fetch_seasonal` run (any day) to unblock dlouhodobá.
 
 ## Priority order (revised — Bod deprioritized, Revize + pins now ahead
 ## of remaining original Bod/detail polish items)
@@ -131,10 +146,12 @@ NOT YET DONE / KNOWN BROKEN (going into next session):
 1. **FÁZE 4 — stabilization** — DONE (PR #2): Historie custom-range year
    bug fixed, Bod accordion default-closed, minimal regression tests in
    notes/tests.py.
-2. **Revize expansion** — currently only shows the nearest day or two
-   for CZ. Needs to cover the full available future range (short-range
-   16 days + medium-range), not just tomorrow — this is more useful for
-   the marketing team's actual planning horizon than Bod page detail work.
+2. **Revize expansion** — DONE (view/template): střednědobá (EC46) and
+   dlouhodobá (SEAS5) buckets now do real revision comparisons instead
+   of a hardcoded coming-soon card. Blocked on data, not code — see
+   NOT YET DONE above (no EC46 ingestion command exists yet, SEAS5 has
+   only 1 snapshot). Build the EC46 fetch command next to actually see
+   this bucket populate.
 3. **Historie "pin" annotations** (scoped-down from the original graph-pin
    idea — much lower risk than initially assessed):
    - Reuses the EXISTING manual-comparison form on Historie (od/do/roky/

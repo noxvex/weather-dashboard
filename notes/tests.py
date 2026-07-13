@@ -9,6 +9,7 @@ from datetime import date, timedelta
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import TestCase
+from django.urls import reverse
 from django.utils import timezone
 
 from ingest.models import DailyForecast, HistoricalActual, MediumLongRangeForecast, WeatherPoint
@@ -289,3 +290,84 @@ class FcFillRegressionTest(TestCase):
         content = resp.content.decode()
         styles = set(re.findall(r'class="fc-fill" style="([^"]+)"', content))
         self.assertGreater(len(styles), 1, "all fc-fill bars rendered identically — regression")
+
+
+class RevisionTrackerMlrBucketTest(TestCase):
+    """
+    Střednědobá (EC46) / dlouhodobá (SEAS5) revision buckets on /revize/ —
+    same not_enough_data fallback as aktuální, but comparing temp_mean
+    directly (1.0 °C threshold, noisier than aktuální's 0.5) and
+    precip_probability as percentage points, not mm.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="tester5", password="x")
+        self.client.force_login(self.user)
+        self.point = WeatherPoint.objects.create(
+            name="Testovice", region="Test", country="CZ", latitude=50.0, longitude=15.0,
+        )
+
+    def _get(self, bucket):
+        return self.client.get(reverse("notes:revision_tracker"), {"rozsah": bucket})
+
+    def test_not_enough_data_with_zero_snapshots(self):
+        resp = self._get("strednedobe")
+        self.assertTrue(resp.context["not_enough_data"])
+        self.assertEqual(resp.context["revisions"], [])
+
+    def test_not_enough_data_with_single_snapshot(self):
+        MediumLongRangeForecast.objects.create(
+            point=self.point, target_date=date.today() + timedelta(days=10),
+            issued_at=timezone.now(), horizon=MediumLongRangeForecast.HORIZON_EC46,
+            temp_mean=15.0, precip_probability=40.0,
+        )
+        resp = self._get("strednedobe")
+        self.assertTrue(resp.context["not_enough_data"])
+
+    def test_revision_shown_above_threshold_hidden_below(self):
+        # 2.0 °C swing must show, 0.5 °C swing must not — aktuální's 0.5
+        # threshold does not apply here, these buckets use 1.0.
+        target_above = date.today() + timedelta(days=10)
+        target_below = date.today() + timedelta(days=11)
+        previous_issued = timezone.now() - timedelta(days=1)
+        latest_issued = timezone.now()
+
+        for target, prev_temp, latest_temp, prev_prob, latest_prob in [
+            (target_above, 10.0, 12.0, 30.0, 45.0),
+            (target_below, 10.0, 10.5, 30.0, 32.0),
+        ]:
+            MediumLongRangeForecast.objects.create(
+                point=self.point, target_date=target, issued_at=previous_issued,
+                horizon=MediumLongRangeForecast.HORIZON_EC46,
+                temp_mean=prev_temp, precip_probability=prev_prob,
+            )
+            MediumLongRangeForecast.objects.create(
+                point=self.point, target_date=target, issued_at=latest_issued,
+                horizon=MediumLongRangeForecast.HORIZON_EC46,
+                temp_mean=latest_temp, precip_probability=latest_prob,
+            )
+
+        resp = self._get("strednedobe")
+        self.assertNotIn("not_enough_data", resp.context)
+        revisions = resp.context["revisions"]
+        dates_shown = {r["date"] for r in revisions}
+        self.assertIn(target_above, dates_shown)
+        self.assertNotIn(target_below, dates_shown)
+
+        row = next(r for r in revisions if r["date"] == target_above)
+        self.assertEqual(row["temp_delta"], 2.0)
+        self.assertEqual(row["precip_prob_delta"], 15)
+
+    def test_seas5_fixtures_do_not_leak_into_ec46_bucket(self):
+        MediumLongRangeForecast.objects.create(
+            point=self.point, target_date=date.today() + timedelta(days=100),
+            issued_at=timezone.now() - timedelta(days=1),
+            horizon=MediumLongRangeForecast.HORIZON_SEAS5, temp_mean=8.0, precip_probability=20.0,
+        )
+        MediumLongRangeForecast.objects.create(
+            point=self.point, target_date=date.today() + timedelta(days=100),
+            issued_at=timezone.now(),
+            horizon=MediumLongRangeForecast.HORIZON_SEAS5, temp_mean=10.0, precip_probability=25.0,
+        )
+        resp = self._get("strednedobe")
+        self.assertTrue(resp.context["not_enough_data"])
