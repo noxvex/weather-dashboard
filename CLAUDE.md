@@ -42,6 +42,9 @@ Repo: `noxvex/weather-dashboard` (public). Live: `weather-dashboard-production-6
    only deploys from `main`) until merged. Confirm after merging with
    `git log origin/main --oneline -3` that the commit actually landed
    on main, not just that gh reported success.
+8. If `notes/tests.py` (or a `notes/tests/` package) exists, run
+   `python manage.py test` before ending every phase and before merging —
+   it's what catches a fix in one place silently breaking something else.
 
 ## Known gotchas (already debugged once — don't rediscover)
 - Railway "private networking" only resolves `*.railway.internal` from

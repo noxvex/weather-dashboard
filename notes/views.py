@@ -982,6 +982,14 @@ def historie(request):
             rezim = "abs"
         rows = _historical_series(country=country, point_id=point_id, granularity=gran, metric=metric)
 
+        # "Current year" must be determined from the full unfiltered series,
+        # not from the doy-filtered by_year below — a custom range that reaches
+        # into the future (e.g. today..end of year) has no rows yet for the
+        # current year in that slice, which would otherwise make max(by_year)
+        # silently resolve to last year and shift the whole "last N years"
+        # window off by one.
+        current_year = max((r["year"] for r in rows), default=None)
+
         by_year = {}
         for r in rows:
             if r["value"] is None:
@@ -993,13 +1001,14 @@ def historie(request):
             by_year[r["year"]]["x"].append(x)
             by_year[r["year"]]["values"].append(round(r["value"], 1))
 
-        current_year = max(by_year) if by_year else None
         if rozsah == "vlastni" and current_year is not None:
             by_year = {y: s for y, s in by_year.items() if y > current_year - roky}
 
         # Similarity % of each year vs the current year over overlapping x:
         # 100 % = identical, each °C (or mm) of mean abs difference costs 12.5 pts.
-        cur_map = dict(zip(by_year[current_year]["x"], by_year[current_year]["values"])) if current_year else {}
+        # current_year may have no rows in this doy slice (e.g. range reaches
+        # into the future) — cur_map stays empty and similarity is skipped.
+        cur_map = dict(zip(by_year[current_year]["x"], by_year[current_year]["values"])) if current_year in by_year else {}
         for year, s in by_year.items():
             if year == current_year or not cur_map:
                 s["sim"] = None
