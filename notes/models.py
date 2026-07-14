@@ -131,5 +131,21 @@ class HistoriePin(models.Model):
         })
         return f"{reverse('historie')}?{qs}"
 
+    def selection_label(self):
+        """Human label of the pinned bod, matching what Historie shows."""
+        if self.sel == "cz":
+            return "ČR (národní průměr)"
+        if self.sel == "sk":
+            return "SR (národní průměr)"
+        from ingest.models import WeatherPoint
+        point = WeatherPoint.objects.filter(pk=self.sel).first() if self.sel.isdigit() else None
+        return f"{point.name} ({point.country})" if point else "neznámý bod"
+
+    @property
+    def summary_label(self):
+        """Text summary of the comparison params for the Aktuality card."""
+        metric_label = "srážky" if self.metric == self.METRIC_PRECIP else "teplota"
+        return f"{self.od} – {self.do} · posledních {self.roky} let · {self.selection_label()} · {metric_label}"
+
     def __str__(self):
         return f"{self.author.username} pin [{self.sel} {self.od}–{self.do}] — {self.created_at:%Y-%m-%d %H:%M}"

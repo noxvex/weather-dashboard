@@ -1,0 +1,76 @@
+{% comment %}
+Single feed note card, shared by the Aktuality feed and the Historie side
+column. Context: note (with .user_can_modify annotated), user_can_pin;
+optional hide_actions=True renders a read-only card (used on Historie).
+Notes cross-posted from a Historie pin (note.historie_pin) get a param
+summary + deep link back to the exact comparison.
+{% endcomment %}
+<div class="note-card
+    {% if note.is_system %}note--h-{{ note.horizon }}
+    {% elif note.author.role == 'admin' %}note--admin
+    {% elif note.author.role == 'leader' %}note--leader{% endif %}">
+
+    <div class="note-meta">
+        {% if note.is_system %}
+            <span class="note-author is-system">Systém</span>
+            <span class="note-dot">·</span>
+            {% if note.note_type == "system_change" %}
+                <span class="note-badge badge-change">změna</span>
+            {% elif note.note_type == "system_outlook" %}
+                <span class="note-badge badge-outlook">výhled</span>
+            {% endif %}
+            <span class="note-badge badge-h-{{ note.horizon }}">{{ note.get_horizon_display }}</span>
+        {% elif note.author.role == "admin" %}
+            <span class="note-author is-admin">{{ note.author.username }}</span>
+        {% elif note.author.role == "leader" %}
+            <span class="note-author is-leader">{{ note.author.username }}</span>
+        {% else %}
+            <span class="note-author">{{ note.author.username }}</span>
+        {% endif %}
+        <span class="note-dot">·</span>
+        <span class="note-time">{{ note.created_at|date:"j. n. Y, H:i" }}</span>
+        {# Country chip: CZ / SR / neutral for both #}
+        {% if note.country == "cz" %}
+            <span class="note-badge badge-country cz">CZ</span>
+        {% elif note.country == "sk" %}
+            <span class="note-badge badge-country sk">SK</span>
+        {% else %}
+            <span class="note-badge badge-country">CZ + SK</span>
+        {% endif %}
+        {% if note.is_pinned %}
+            <span class="note-badge badge-pinned">📌 připnuto</span>
+        {% endif %}
+    </div>
+
+    <div class="note-body">{{ note.body }}</div>
+
+    {% if note.historie_pin %}
+        <div style="margin-top:8px; font-size:12.5px; color:var(--muted);">
+            📌 {{ note.historie_pin.summary_label }}
+            · <a href="{{ note.historie_pin.historie_url }}" style="color:var(--accent);">Otevřít v Historii →</a>
+        </div>
+    {% endif %}
+
+    {% if not hide_actions %}
+        {% if note.user_can_modify or user_can_pin %}
+            <div class="note-actions">
+                {% if note.user_can_modify %}
+                    <a href="{% url 'notes:edit' note.pk %}" class="act-btn">Upravit</a>
+                    <form method="post" action="{% url 'notes:delete' note.pk %}" style="display:inline;">
+                        {% csrf_token %}
+                        <button type="submit" class="act-btn danger"
+                                onclick="return confirm('Smazat tuto poznámku?')">Smazat</button>
+                    </form>
+                {% endif %}
+                {% if user_can_pin %}
+                    <form method="post" action="{% url 'notes:pin' note.pk %}" style="display:inline; margin-left:auto;">
+                        {% csrf_token %}
+                        <button type="submit" class="act-btn {% if note.is_pinned %}is-pinned{% endif %}">
+                            {% if note.is_pinned %}Odepnout{% else %}Připnout{% endif %}
+                        </button>
+                    </form>
+                {% endif %}
+            </div>
+        {% endif %}
+    {% endif %}
+</div>
