@@ -139,7 +139,10 @@ DONE (verified live on production):
   uses Open-Meteo's default "Seasonal Seamless" blend, which already
   mixes EC46 into its first 46 days; this command isolates pure EC46
   instead. `forecast_days=46` confirmed as EC46's real horizon (values
-  go null past day ~46 if you ask for more).
+  go null past day ~46 if you ask for more). Run once via `railway ssh`
+  on 2026-07-13: 1012 rows across all 22 points (22 × 46 days), 0
+  failures, 1 distinct issued_at snapshot. Confirmed střednědobá still
+  correctly renders "zatím málo dat" with just this 1 snapshot (needs 2).
 
 NOT YET DONE / KNOWN BROKEN (going into next session):
 - No Railway cron/worker service yet for `ingest_weather` OR
@@ -148,10 +151,11 @@ NOT YET DONE / KNOWN BROKEN (going into next session):
   daily via Railway Cron" (confirmed via `railway status`: only the web
   service + Postgres exist, no cron/worker resource at all — that line
   was aspirational, not actual). Needs a real scheduled worker service.
-- Revize střednědobá needs `fetch_ec46` run at least twice (2 distinct
-  issued_at snapshots) before it shows real revisions — 1 run alone
-  still correctly renders not_enough_data. See status above for the
-  2026-07-13 verification numbers once run.
+- Revize střednědobá still won't show real revisions until `fetch_ec46`
+  is run a 2nd time on a later day (1 snapshot exists as of 2026-07-13,
+  needs 2 distinct issued_at values). Same for dlouhodobá/SEAS5, which
+  also still has only 1 snapshot. Run `fetch_ec46` (and ideally
+  `fetch_seasonal`) again via `railway ssh` next session.
 
 ## Priority order (revised — Bod deprioritized, Revize + pins now ahead
 ## of remaining original Bod/detail polish items)
