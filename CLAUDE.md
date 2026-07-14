@@ -152,7 +152,7 @@ DONE (verified live on production):
 - Two cron wrapper commands added: `run_frequent_ingest` (ingest_weather
   → detect_changes → generate_outlook_notes) and `run_daily_ingest`
   (fetch_seasonal → fetch_ec46 → fetch_pollen → fetch_era5_backfill with
-  a rolling 14-day `--start`). Each sub-step is its own try/except so one
+  a rolling 14-day `--start` → prune_notes). Each sub-step is its own try/except so one
   failure doesn't block the rest; both always exit 0 and print an
   "N/total steps succeeded" summary line — check that line + stderr in
   Railway's logs, don't rely on exit code to detect a partial failure.
@@ -167,6 +167,28 @@ DONE (verified live on production):
   moved `migrate --noinput` into the `web:` line, running before
   collectstatic/gunicorn. Migrations now run automatically on every
   deploy instead of needing manual `railway ssh` runs.
+- Historie piny (PRs #10–#14, 2026-07-14): `HistoriePin` model (separate
+  table by explicit user choice, NOT extra fields on Note; params stored
+  in the exact Historie GET-param format so deep links are a plain
+  urlencode). "Přidat pin" button + modal on the comparison form
+  (rozsah=vlastni only; metric only t/p — pct mode doesn't exist for
+  custom ranges), 📌 text-scatter marker on the overlay chart (no
+  vertical line; y = nearest chart point, current year preferred),
+  compact pin list under the chart filtered to the displayed bod+metric,
+  click marker ↔ list both ways, detail = min/max/avg/std mini-table
+  from the same daily `_historical_series` + year-window rules as the
+  comparison itself. Cross-post: show_in_feed=True creates a linked
+  human Note (pin.feed_note, OneToOne SET_NULL) rendered via the new
+  shared `_note_card.html` include with param summary + deep link;
+  read-only Aktuality column sits right of the Historie chart.
+  Lifecycle: prune_notes handles pins with the same 14d-soft/30d-hard
+  cutoffs (pinned exempt); pin EXPIRY intentionally does NOT delete its
+  feed card (card has its own lifecycle) but explicit pin deletion
+  cascades to the card (HistoriePin.delete()). Permissions mirror notes:
+  author or leader/admin edit/delete (edit = body only, syncs card),
+  pin/unpin leader/admin only. Tests: HistoriePinLifecycleTest,
+  PinCreateViewTest, PinPermissionsTest (notes/tests.py), updated
+  RunDailyIngestTest (5th step). Suite: 35 tests green.
 
 NOT YET DONE / KNOWN BROKEN (going into next session):
 - No Railway cron/worker service yet for `ingest_weather` OR
@@ -215,21 +237,12 @@ NOT YET DONE / KNOWN BROKEN (going into next session):
    remaining gap is time — needs a 2nd `fetch_ec46`/`fetch_seasonal` run
    on a later day before either bucket shows real deltas (see NOT YET
    DONE above).
-3. **Historie "pin" annotations** (scoped-down from the original graph-pin
-   idea — much lower risk than initially assessed):
-   - Reuses the EXISTING manual-comparison form on Historie (od/do/roky/
-     bod/metric) — no new pixel-click-on-graph interaction needed
-   - User configures a comparison (date range, years, metric: temp abs/%,
-     precipitation; air quality metric later once that data exists)
-   - "Add pin" button saves it as a Note (existing model) tagged with
-     those parameters + author name, default pre-filled comment text
-     ("Kouknětě na tyhle data...", user edits it)
-   - Pin appears on the Historie graph itself (marker/annotation, NOT a
-     live embedded chart) and optionally cross-posts to Aktuality feed
-     as a note with a deep link back to Historie with those exact params
-   - Aktuality card shows TEXT SUMMARY only (e.g. "Duben–červenec,
-     posledních 5 let, průměr 18°C") — no embedded graph in the feed,
-     keep it simple first
+3. **Historie "pin" annotations** — DONE (PRs #10–#14, see DONE above).
+   Deviations from the original sketch: separate `HistoriePin` table
+   instead of extending Note (user's explicit choice), metric only
+   temp-abs/precip (pct mode doesn't exist for custom ranges), card
+   summary has no computed average (avg lives in the pin detail on
+   Historie). Air-quality metric still future (needs the data first).
 4. Remaining original "Bod/detail" polish (larger temp numbers, resize
    sections, scrollable table) — lower priority now, Bod itself matters
    less than short/medium-range change tracking per user's actual usage
