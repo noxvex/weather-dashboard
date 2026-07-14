@@ -354,7 +354,9 @@ def aktuality(request):
     horizont = request.GET.get("horizont", "")   # "" = short+mid (default), short/mid/long/vse
     zeme = request.GET.get("zeme", "")           # "" = both, cz, sk
 
-    notes_qs = Note.objects.select_related("author").filter(is_hidden=False)
+    # historie_pin: reverse OneToOne of cross-posted pin cards — select_related
+    # so the card's summary/deep link doesn't cost a query per note
+    notes_qs = Note.objects.select_related("author", "historie_pin").filter(is_hidden=False)
     filtered = _apply_filter(notes_qs, autor)
     filtered = _apply_time_filter(filtered, rozsah)
     filtered = _apply_horizon_filter(filtered, horizont)
@@ -532,6 +534,30 @@ def _pins_context(user, sel, metric, gran, country, point_id, rows):
     return pins
 
 
+def _create_pin_feed_note(pin):
+    """
+    Cross-post a pin into the Aktuality feed as a regular human note holding
+    the pin's comment; the card's param summary + deep link render from the
+    linked pin (note.historie_pin) in _note_card.html. Lifecycle of the card
+    is the standard prune_notes one, independent of the pin's own.
+    """
+    country = Note.COUNTRY_BOTH
+    if pin.sel in (Note.COUNTRY_CZ, Note.COUNTRY_SK):
+        country = pin.sel
+    elif pin.sel.isdigit():
+        point = WeatherPoint.objects.filter(pk=pin.sel).first()
+        if point:
+            country = point.country.lower()
+    note = Note.objects.create(
+        author=pin.author,
+        body=pin.body,
+        note_type=Note.TYPE_HUMAN,
+        country=country,
+    )
+    pin.feed_note = note
+    pin.save(update_fields=["feed_note"])
+
+
 @login_required
 def pin_create(request):
     if request.method != "POST":
@@ -542,6 +568,8 @@ def pin_create(request):
     pin = form.save(commit=False)
     pin.author = request.user
     pin.save()
+    if pin.show_in_feed:
+        _create_pin_feed_note(pin)
     return redirect(pin.historie_url())
 
 
@@ -1343,9 +1371,16 @@ def historie(request):
             country=country, point_id=point_id, rows=rows,
         )
 
+    # Side column: the same Aktuality feed cards, read-only, for side-by-side
+    # comparison with the chart (no filters — just the freshest notes)
+    feed_notes = list(
+        Note.objects.select_related("author", "historie_pin").filter(is_hidden=False)[:10]
+    )
+
     return render(request, "notes/historie.html", {
         "chart_json": chart,  # raw dict — json_script serializes it (never pre-dump!)
         "has_data": has_data,
+        "feed_notes": feed_notes,
         "points": points,
         "sel": sel,
         "gran": gran,
