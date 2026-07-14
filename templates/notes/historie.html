@@ -5,6 +5,20 @@
 {% block extra_head %}
 {# No defer: Plotly must be loaded before the inline draw script runs #}
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+#pin-dialog {
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 20px; min-width: 360px; max-width: min(480px, 92vw);
+}
+#pin-dialog::backdrop { background: rgba(0, 0, 0, .55); }
+#pin-dialog textarea {
+    width: 100%; margin-top: 10px; padding: 8px 10px;
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    font: inherit; font-size: 13px; resize: vertical;
+}
+</style>
 {% endblock %}
 
 {% block content %}
@@ -62,7 +76,38 @@
     do <input type="text" name="do" placeholder="15.11" value="{{ do }}">
     · počet let <input type="number" name="roky" min="2" max="12" value="{{ roky }}">
     <button type="submit" class="mode-btn">Porovnat</button>
+    {% if rozsah == "vlastni" and has_data %}
+    <button type="button" class="mode-btn" onclick="document.getElementById('pin-dialog').showModal()">📌 Přidat pin</button>
+    {% endif %}
 </form>
+
+{% if rozsah == "vlastni" and has_data %}
+{# Pin-creation modal — params mirror the comparison currently on screen #}
+<dialog id="pin-dialog">
+    <form method="post" action="{% url 'pin_create' %}">
+        {% csrf_token %}
+        <input type="hidden" name="sel" value="{{ sel }}">
+        <input type="hidden" name="od" value="{{ od }}">
+        <input type="hidden" name="do" value="{{ do }}">
+        <input type="hidden" name="roky" value="{{ roky }}">
+        <input type="hidden" name="metric" value="{{ metric }}">
+        <div class="card-title" style="margin-bottom:6px;">📌 Přidat pin</div>
+        <p style="color:var(--muted); font-size:13px; margin:0;">
+            {{ od }} – {{ do }} · posledních {{ roky }} let ·
+            {{ selection_label }} · {% if metric == "p" %}srážky{% else %}teplota{% endif %}
+        </p>
+        <textarea name="body" rows="3">Kouknětě na tyhle data...</textarea>
+        <label style="display:flex; align-items:center; gap:8px; margin-top:10px; color:var(--text); font-size:13px; cursor:pointer;">
+            <input type="checkbox" name="show_in_feed" checked>
+            Poslat i do Aktualit (jinak zůstane jen na Historii)
+        </label>
+        <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:14px;">
+            <button type="button" class="mode-btn" onclick="document.getElementById('pin-dialog').close()">Zrušit</button>
+            <button type="submit" class="mode-btn active">Uložit pin</button>
+        </div>
+    </form>
+</dialog>
+{% endif %}
 
 {% if has_data and rozsah == "plna" or has_data and rozsah == "vlastni" %}
 {# View toggles — client-side restyle + server-side value mode #}

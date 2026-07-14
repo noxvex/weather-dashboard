@@ -10,5 +10,6 @@ urlpatterns = [
     path("aktuality/", include("notes.urls")),
     path("bod/", notes_views.point_detail, name="bod"),
     path("historie/", notes_views.historie, name="historie"),
+    path("historie/piny/nova/", notes_views.pin_create, name="pin_create"),
     path("", RedirectView.as_view(url="/aktuality/"), name="home"),
 ]
