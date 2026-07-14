@@ -143,6 +143,19 @@ DONE (verified live on production):
   on 2026-07-13: 1012 rows across all 22 points (22 × 46 days), 0
   failures, 1 distinct issued_at snapshot. Confirmed střednědobá still
   correctly renders "zatím málo dat" with just this 1 snapshot (needs 2).
+- Two cron wrapper commands added: `run_frequent_ingest` (ingest_weather
+  → detect_changes → generate_outlook_notes) and `run_daily_ingest`
+  (fetch_seasonal → fetch_ec46 → fetch_pollen → fetch_era5_backfill with
+  a rolling 14-day `--start`). Each sub-step is its own try/except so one
+  failure doesn't block the rest; both always exit 0 and print an
+  "N/total steps succeeded" summary line — check that line + stderr in
+  Railway's logs, don't rely on exit code to detect a partial failure.
+  Neither is wired into Procfile — they're meant for their own Railway
+  Cron services (see "Manual Railway setup required" below; code-side
+  work is done, the actual cron service creation is a dashboard step).
+  Tests: RunFrequentIngestTest, RunDailyIngestTest in ingest/tests.py
+  (mock call_command to confirm a raised exception on one step doesn't
+  stop the others).
 
 NOT YET DONE / KNOWN BROKEN (going into next session):
 - No Railway cron/worker service yet for `ingest_weather` OR
@@ -150,12 +163,34 @@ NOT YET DONE / KNOWN BROKEN (going into next session):
   `railway ssh` despite `fetch_seasonal.py`'s docstring claiming "Run
   daily via Railway Cron" (confirmed via `railway status`: only the web
   service + Postgres exist, no cron/worker resource at all — that line
-  was aspirational, not actual). Needs a real scheduled worker service.
+  was aspirational, not actual). The `run_frequent_ingest`/
+  `run_daily_ingest` wrapper commands now exist (see DONE above) but
+  still need the manual Railway dashboard setup below before anything
+  runs on a schedule.
 - Revize střednědobá still won't show real revisions until `fetch_ec46`
   is run a 2nd time on a later day (1 snapshot exists as of 2026-07-13,
   needs 2 distinct issued_at values). Same for dlouhodobá/SEAS5, which
-  also still has only 1 snapshot. Run `fetch_ec46` (and ideally
-  `fetch_seasonal`) again via `railway ssh` next session.
+  also still has only 1 snapshot. Will self-resolve once the daily cron
+  is set up and has run twice; can also be forced via `railway ssh` in
+  the meantime.
+
+### Manual Railway setup required (do this in the dashboard — NOT via
+### railway.toml/config-as-code: Railway has a known Dec-2025 bug where
+### cron schedules set via config-as-code silently get "stuck"; use the
+### dashboard Settings > Cron Schedule field instead)
+1. New service **"cron-frequent"**, same repo/branch as the web service.
+   - Settings > Deploy > Custom Start Command: `python manage.py run_frequent_ingest`
+   - Settings > Cron Schedule: `0 */12 * * *` (every 12h, UTC — Railway
+     cron is always UTC, there's no timezone conversion field)
+2. New service **"cron-daily"**, same repo/branch.
+   - Settings > Deploy > Custom Start Command: `python manage.py run_daily_ingest`
+   - Settings > Cron Schedule: `0 2 * * *` (02:00 UTC ≈ 03:00–04:00
+     Prague depending on DST — off-peak, and after that day's frequent
+     runs would already have refreshed short-range data)
+3. Both new services need the same environment variables as the web
+   service (`DATABASE_URL`, `OPEN_METEO_*` keys) — copy via Railway's
+   "reference variables" or a shared variable group, don't duplicate
+   secrets by hand.
 
 ## Priority order (revised — Bod deprioritized, Revize + pins now ahead
 ## of remaining original Bod/detail polish items)
