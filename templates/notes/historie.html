@@ -18,6 +18,19 @@
     border: 1px solid var(--border); border-radius: 6px;
     font: inherit; font-size: 13px; resize: vertical;
 }
+.pin-item {
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; cursor: pointer;
+    transition: border-color .15s, background .15s;
+}
+.pin-item:hover { border-color: rgba(74, 158, 255, .4); }
+.pin-item.hl { border-color: var(--accent); background: rgba(74, 158, 255, .08); }
+.pin-stats { border-collapse: collapse; font-size: 12.5px; margin-top: 2px; }
+.pin-stats th {
+    color: var(--muted); font-weight: 500; text-align: left;
+    padding: 2px 18px 2px 0;
+}
+.pin-stats td { color: var(--text); padding: 2px 18px 2px 0; }
 </style>
 {% endblock %}
 
@@ -147,6 +160,40 @@
     {% endif %}
 </div>
 
+{% if pins %}
+{# ── Pins for the current bod+metric — click ↔ marker highlight in the chart ── #}
+<div class="card" style="margin-top:14px;">
+    <div class="card-title">📌 Piny pro tento výběr · {{ pins|length }}</div>
+    <div id="pin-list" style="max-height:280px; overflow-y:auto; display:flex; flex-direction:column; gap:8px;">
+        {% for p in pins %}
+        <div class="pin-item" data-pin-id="{{ p.id }}" onclick="selectPin({{ p.id }}, false)">
+            <div style="font-size:13px;">
+                📌 <strong style="color:var(--text);">{{ p.author }}</strong>
+                <span style="color:var(--muted);">· {{ p.od }} – {{ p.do }} · posledních {{ p.roky }} let · {{ p.created|date:"j.n.Y" }}</span>
+                {% if p.is_pinned %}<span style="color:var(--accent);" title="Připnuto — nevyprší">∞</span>{% endif %}
+            </div>
+            <div style="color:var(--text); font-size:13px; margin-top:4px;">{{ p.body }}</div>
+            <div class="pin-detail" id="pin-detail-{{ p.id }}" hidden style="margin-top:8px;">
+                {% if p.stats %}
+                <table class="pin-stats">
+                    <tr><th>Min</th><th>Max</th><th>Průměr</th><th>Odchylka</th></tr>
+                    <tr>
+                        <td>{{ p.stats.min }} {% if metric == "p" %}mm{% else %}°C{% endif %}</td>
+                        <td>{{ p.stats.max }} {% if metric == "p" %}mm{% else %}°C{% endif %}</td>
+                        <td>{{ p.stats.avg }} {% if metric == "p" %}mm{% else %}°C{% endif %}</td>
+                        <td>± {{ p.stats.std }} {% if metric == "p" %}mm{% else %}°C{% endif %}</td>
+                    </tr>
+                </table>
+                {% else %}
+                <span style="color:var(--muted); font-size:12px;">Pro rozsah pinu nejsou historická data.</span>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
 {% endblock %}
 
 {% block extra_js %}
@@ -158,9 +205,27 @@ function histSubmit(form) {
     if (loading) loading.style.display = 'block';
     form.submit();
 }
+
+// Select a pin from either side: highlight its list item, open its detail,
+// and (when the chart is drawn) enlarge its marker. fromChart also scrolls
+// the list so the clicked marker's item is visible.
+function selectPin(id, fromChart) {
+    document.querySelectorAll('.pin-item').forEach(el => {
+        el.classList.toggle('hl', el.dataset.pinId == id);
+    });
+    document.querySelectorAll('.pin-detail').forEach(el => {
+        el.hidden = (el.id !== 'pin-detail-' + id);
+    });
+    if (fromChart) {
+        const item = document.querySelector('.pin-item[data-pin-id="' + id + '"]');
+        if (item) item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+    if (window.highlightPinMarker) highlightPinMarker(id);
+}
 </script>
 {% if has_data %}
 {{ chart_json|json_script:"hist-chart-data" }}
+{{ pins_marker|json_script:"hist-pins-data" }}
 <script>
 (function () {
     const raw = JSON.parse(document.getElementById('hist-chart-data').textContent);
@@ -271,13 +336,57 @@ function histSubmit(form) {
             const s = styleFor(mode, t.yr, t.i);
             colors.push(s.color); widths.push(s.width); opacities.push(s.opacity);
         });
-        Plotly.restyle('hist-chart', { 'line.color': colors, 'line.width': widths, 'opacity': opacities });
+        // Explicit indices: only the year traces — the pin-marker trace
+        // appended below must keep its own size/opacity untouched
+        Plotly.restyle('hist-chart', { 'line.color': colors, 'line.width': widths, 'opacity': opacities },
+                       traceMeta.map((_, idx) => idx));
         document.querySelectorAll('.mode-btn[data-mode]').forEach(b => {
             b.classList.toggle('active', b.dataset.mode === mode);
         });
     };
 
     Plotly.newPlot('hist-chart', traces, layout, config);
+
+    // ── Pin markers ──
+    const pinEl = document.getElementById('hist-pins-data');
+    const pinData = pinEl ? JSON.parse(pinEl.textContent) : [];
+    if (pinData.length) {
+        // y for a marker: value of the chart point nearest to the pin's mid
+        // x, with a slight preference for the current year's trace
+        function nearestY(x) {
+            let best = null, bestDist = Infinity;
+            raw.years.forEach(yr => {
+                yr.x.forEach((xx, k) => {
+                    const d = Math.abs(xx - x) + (yr.year === currentYear ? 0 : 0.25);
+                    if (d < bestDist) { bestDist = d; best = yr.values[k]; }
+                });
+            });
+            return best;
+        }
+        const shown = pinData
+            .map(p => ({ p: p, y: nearestY(p.x) }))
+            .filter(o => o.y !== null && o.y !== undefined);
+        if (shown.length) {
+            const pinTraceIndex = traces.length;
+            Plotly.addTraces('hist-chart', [{
+                x: shown.map(o => o.p.x), y: shown.map(o => o.y),
+                type: 'scatter', mode: 'text',
+                text: shown.map(() => '📌'),
+                textfont: { size: 15 },
+                name: 'Piny', showlegend: false,
+                hoverinfo: 'text',
+                hovertext: shown.map(o => '📌 ' + o.p.author + ' · ' + o.p.od + ' – ' + o.p.do),
+            }]);
+            document.getElementById('hist-chart').on('plotly_click', ev => {
+                const pt = ev.points.find(q => q.curveNumber === pinTraceIndex);
+                if (pt) selectPin(shown[pt.pointNumber].p.id, true);
+            });
+            window.highlightPinMarker = function (id) {
+                const sizes = shown.map(o => (o.p.id === id ? 22 : 15));
+                Plotly.restyle('hist-chart', { 'textfont.size': [sizes] }, [pinTraceIndex]);
+            };
+        }
+    }
 }());
 </script>
 {% endif %}
