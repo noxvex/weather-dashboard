@@ -475,6 +475,63 @@ def note_pin(request, pk):
 
 # ── Historie pins ───────────────────────────────────────────────────────────
 
+def _pins_context(user, sel, metric, gran, country, point_id, rows):
+    """
+    Pins matching the currently displayed bod+metric, newest first. Each gets
+    a marker x in the chart's current x units (doy or week) and a
+    min/max/avg/std mini-table computed from the same daily series + year
+    window rules the comparison view itself uses (rows is reused when the
+    chart is already daily, so plna-weekly is the only mode paying an extra
+    query — and only when pins exist).
+    """
+    pin_rows = list(
+        HistoriePin.objects.select_related("author")
+        .filter(is_hidden=False, sel=sel, metric=metric)
+        .order_by("-created_at")[:30]
+    )
+    if not pin_rows:
+        return []
+
+    daily = rows if gran == "d" else _historical_series(
+        country=country, point_id=point_id, granularity="d", metric=metric,
+    )
+    current_year = max((r["year"] for r in daily), default=None)
+
+    pins = []
+    for p in pin_rows:
+        f, t = parse_dm(p.od), parse_dm(p.do)
+        if f is None or t is None:
+            continue
+        if f > t:
+            f, t = t, f
+        vals = [
+            r["value"] for r in daily
+            if r["value"] is not None and f <= int(r["x"]) <= t
+            and (current_year is None or r["year"] > current_year - p.roky)
+        ]
+        stats = None
+        if vals:
+            avg = sum(vals) / len(vals)
+            std = (sum((v - avg) ** 2 for v in vals) / len(vals)) ** 0.5
+            stats = {
+                "min": round(min(vals), 1), "max": round(max(vals), 1),
+                "avg": round(avg, 1), "std": round(std, 1),
+            }
+        mid = (f + t) // 2
+        pins.append({
+            "id": p.pk,
+            "x": mid if gran == "d" else (mid - 1) // 7 + 1,
+            "od": p.od, "do": p.do, "roky": p.roky,
+            "author": p.author.username,
+            "created": p.created_at,
+            "body": p.body,
+            "is_pinned": p.is_pinned,
+            "can_modify": _can_modify(user, p),
+            "stats": stats,
+        })
+    return pins
+
+
 @login_required
 def pin_create(request):
     if request.method != "POST":
@@ -1171,6 +1228,7 @@ def historie(request):
         else:
             point_id, selection_label = point.pk, f"{point.name} ({point.country})"
 
+    pins = []
     if rozsah in ("kratka", "stredni", "dlouha"):
         # Recent-actuals span: simple date series, no overlay
         span = _historical_span(
@@ -1279,6 +1337,12 @@ def historie(request):
             chart["xrange"] = [doy_from, doy_to]
         has_data = bool(by_year)
 
+        # Pins live in doy space, so they only render in overlay modes
+        pins = _pins_context(
+            request.user, sel=sel, metric=metric, gran=gran,
+            country=country, point_id=point_id, rows=rows,
+        )
+
     return render(request, "notes/historie.html", {
         "chart_json": chart,  # raw dict — json_script serializes it (never pre-dump!)
         "has_data": has_data,
@@ -1292,4 +1356,11 @@ def historie(request):
         "do": do_raw,
         "roky": roky,
         "selection_label": selection_label,
+        "pins": pins,
+        # Slim marker payload for the chart JS (id/x for placement, the rest
+        # feeds the hover text)
+        "pins_marker": [
+            {"id": p["id"], "x": p["x"], "author": p["author"], "od": p["od"], "do": p["do"]}
+            for p in pins
+        ],
     })
