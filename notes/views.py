@@ -12,12 +12,13 @@ from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from django.core.paginator import Paginator
 from django.db.models import Q
-from django.http import Http404
+from django.http import Http404, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 
 from ingest.models import DailyForecast, HistoricalActual, MediumLongRangeForecast, WeatherPoint
-from .forms import NoteForm
-from .models import Note
+from .forms import HistoriePinForm, NoteForm
+from .models import HistoriePin, Note
+from .utils import parse_dm
 
 User = get_user_model()
 
@@ -470,6 +471,21 @@ def note_pin(request, pk):
         note.is_pinned = not note.is_pinned
         note.save(update_fields=["is_pinned"])
     return redirect("notes:aktuality")
+
+
+# ── Historie pins ───────────────────────────────────────────────────────────
+
+@login_required
+def pin_create(request):
+    if request.method != "POST":
+        return redirect("historie")
+    form = HistoriePinForm(request.POST)
+    if not form.is_valid():
+        return HttpResponseBadRequest("Neplatné parametry pinu.")
+    pin = form.save(commit=False)
+    pin.author = request.user
+    pin.save()
+    return redirect(pin.historie_url())
 
 
 # ── Revision tracker ────────────────────────────────────────────────────────
@@ -1129,21 +1145,14 @@ def historie(request):
 
     # Manual comparison: date range typed as "D.M" (e.g. 12.7 till 15.11)
     # plus how many recent years to compare
-    def _parse_dm(s):
-        try:
-            d, m = s.strip().rstrip(".").split(".")[:2]
-            return date(2001, int(m), int(d)).timetuple().tm_yday  # non-leap day-of-year
-        except (ValueError, AttributeError):
-            return None
-
     od_raw = request.GET.get("od", "")
     do_raw = request.GET.get("do", "")
     try:
         roky = max(2, min(12, int(request.GET.get("roky", "5"))))
     except ValueError:
         roky = 5
-    doy_from = _parse_dm(od_raw)
-    doy_to = _parse_dm(do_raw)
+    doy_from = parse_dm(od_raw)
+    doy_to = parse_dm(do_raw)
     if rozsah == "vlastni" and (doy_from is None or doy_to is None):
         rozsah = "plna"  # incomplete input — fall back to full history
     if doy_from is not None and doy_to is not None and doy_from > doy_to:

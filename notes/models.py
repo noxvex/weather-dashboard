@@ -1,5 +1,8 @@
+import urllib.parse
+
 from django.conf import settings
 from django.db import models
+from django.urls import reverse
 
 
 class Note(models.Model):
@@ -119,6 +122,14 @@ class HistoriePin(models.Model):
         if self.feed_note_id:
             self.feed_note.delete()
         return super().delete(*args, **kwargs)
+
+    def historie_url(self):
+        """Deep link opening Historie exactly on this pin's comparison."""
+        qs = urllib.parse.urlencode({
+            "bod": self.sel, "m": self.metric, "rozsah": "vlastni",
+            "od": self.od, "do": self.do, "roky": self.roky,
+        })
+        return f"{reverse('historie')}?{qs}"
 
     def __str__(self):
         return f"{self.author.username} pin [{self.sel} {self.od}–{self.do}] — {self.created_at:%Y-%m-%d %H:%M}"
