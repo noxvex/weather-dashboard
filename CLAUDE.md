@@ -189,6 +189,16 @@ DONE (verified live on production):
   pin/unpin leader/admin only. Tests: HistoriePinLifecycleTest,
   PinCreateViewTest, PinPermissionsTest (notes/tests.py), updated
   RunDailyIngestTest (5th step). Suite: 35 tests green.
+- Pins feedback round (PR #16): FIXED Historie losing od/do/roky on
+  every view switch (seg/rezim links + hidden inputs now carry them);
+  FIXED overlapping pin markers looking like one pin (same-x markers
+  stack vertically); pins now unlimited (no [:30]). Added: selecting a
+  pin shades its od–do range in the chart; Aktuality pin cards show the
+  min/max/avg/std table inline (cached 1h/pin, `_pin_stats_for`); new
+  **Subhistorie** nav page — all pins regardless of bod/metric, summary
+  stats + printable weekly progression (red ▲/teal ▼ deltas with °C AND
+  %, per the delta convention) + @media print stylesheet. Tests:
+  HistoriePinsRoundTwoTest. Suite: 39 tests green.
 
 NOT YET DONE / KNOWN BROKEN (going into next session):
 - No Railway cron/worker service yet for `ingest_weather` OR
