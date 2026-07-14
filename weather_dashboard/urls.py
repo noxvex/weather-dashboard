@@ -14,5 +14,6 @@ urlpatterns = [
     path("historie/piny/<int:pk>/upravit/", notes_views.pin_edit, name="pin_edit"),
     path("historie/piny/<int:pk>/smazat/", notes_views.pin_delete, name="pin_delete"),
     path("historie/piny/<int:pk>/pripnout/", notes_views.pin_toggle, name="pin_toggle"),
+    path("subhistorie/", notes_views.subhistorie, name="subhistorie"),
     path("", RedirectView.as_view(url="/aktuality/"), name="home"),
 ]

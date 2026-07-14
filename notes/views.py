@@ -368,6 +368,14 @@ def aktuality(request):
     notes = list(page_obj.object_list)
     for note in notes:
         note.user_can_modify = _can_modify(request.user, note)
+        # Pin cards carry their mini-table right in the feed, so the values
+        # are readable without opening the graph
+        try:
+            pin = note.historie_pin
+        except HistoriePin.DoesNotExist:
+            pin = None
+        if pin is not None:
+            note.pin_stats = _pin_stats_for(pin)
 
     # Fetch last two short-range batches in one shared query pair.
     # latest_rows (newest batch only) feeds the weather panel and chart.
@@ -477,19 +485,50 @@ def note_pin(request, pk):
 
 # ── Historie pins ───────────────────────────────────────────────────────────
 
+def _pin_series_target(sel):
+    """Map a pin's sel ("cz"/"sk"/point pk) to _historical_series kwargs."""
+    if sel == "cz":
+        return {"country": "CZ", "point_id": None}
+    if sel == "sk":
+        return {"country": "SK", "point_id": None}
+    return {"country": None, "point_id": int(sel) if sel.isdigit() else -1}
+
+
+def _stats_from_daily(daily, doy_from, doy_to, roky):
+    """
+    min/max/avg/std over daily values inside [doy_from, doy_to] across the
+    last `roky` years — the same year-window rule the comparison view uses.
+    Returns None when the slice has no data.
+    """
+    current_year = max((r["year"] for r in daily), default=None)
+    vals = [
+        r["value"] for r in daily
+        if r["value"] is not None and doy_from <= int(r["x"]) <= doy_to
+        and (current_year is None or r["year"] > current_year - roky)
+    ]
+    if not vals:
+        return None
+    avg = sum(vals) / len(vals)
+    std = (sum((v - avg) ** 2 for v in vals) / len(vals)) ** 0.5
+    return {
+        "min": round(min(vals), 1), "max": round(max(vals), 1),
+        "avg": round(avg, 1), "std": round(std, 1),
+    }
+
+
 def _pins_context(user, sel, metric, gran, country, point_id, rows):
     """
-    Pins matching the currently displayed bod+metric, newest first. Each gets
-    a marker x in the chart's current x units (doy or week) and a
-    min/max/avg/std mini-table computed from the same daily series + year
-    window rules the comparison view itself uses (rows is reused when the
-    chart is already daily, so plna-weekly is the only mode paying an extra
-    query — and only when pins exist).
+    Pins matching the currently displayed bod+metric, newest first, no count
+    limit. Each gets marker/shading x positions in the chart's current x
+    units (doy or week) and a min/max/avg/std mini-table computed from the
+    same daily series + year window rules the comparison view itself uses
+    (rows is reused when the chart is already daily, so plna-weekly is the
+    only mode paying an extra query — and only when pins exist).
     """
     pin_rows = list(
         HistoriePin.objects.select_related("author")
         .filter(is_hidden=False, sel=sel, metric=metric)
-        .order_by("-created_at")[:30]
+        .order_by("-created_at")
     )
     if not pin_rows:
         return []
@@ -497,7 +536,9 @@ def _pins_context(user, sel, metric, gran, country, point_id, rows):
     daily = rows if gran == "d" else _historical_series(
         country=country, point_id=point_id, granularity="d", metric=metric,
     )
-    current_year = max((r["year"] for r in daily), default=None)
+
+    def to_x(doy):
+        return doy if gran == "d" else (doy - 1) // 7 + 1
 
     pins = []
     for p in pin_rows:
@@ -506,32 +547,42 @@ def _pins_context(user, sel, metric, gran, country, point_id, rows):
             continue
         if f > t:
             f, t = t, f
-        vals = [
-            r["value"] for r in daily
-            if r["value"] is not None and f <= int(r["x"]) <= t
-            and (current_year is None or r["year"] > current_year - p.roky)
-        ]
-        stats = None
-        if vals:
-            avg = sum(vals) / len(vals)
-            std = (sum((v - avg) ** 2 for v in vals) / len(vals)) ** 0.5
-            stats = {
-                "min": round(min(vals), 1), "max": round(max(vals), 1),
-                "avg": round(avg, 1), "std": round(std, 1),
-            }
-        mid = (f + t) // 2
         pins.append({
             "id": p.pk,
-            "x": mid if gran == "d" else (mid - 1) // 7 + 1,
+            "x": to_x((f + t) // 2),
+            "x0": to_x(f),
+            "x1": to_x(t),
             "od": p.od, "do": p.do, "roky": p.roky,
             "author": p.author.username,
             "created": p.created_at,
             "body": p.body,
             "is_pinned": p.is_pinned,
             "can_modify": _can_modify(user, p),
-            "stats": stats,
+            "stats": _stats_from_daily(daily, f, t, p.roky),
         })
     return pins
+
+
+def _pin_stats_for(pin):
+    """
+    Stats for a single pin outside the Historie page (Aktuality card).
+    Cached 1h per pin — history moves at most once a day.
+    """
+    key = f"pin_stats_{pin.pk}"
+    stats = cache.get(key)
+    if stats is None:
+        f, t = parse_dm(pin.od), parse_dm(pin.do)
+        if f is None or t is None:
+            stats = {}
+        else:
+            if f > t:
+                f, t = t, f
+            daily = _historical_series(
+                granularity="d", metric=pin.metric, **_pin_series_target(pin.sel),
+            )
+            stats = _stats_from_daily(daily, f, t, pin.roky) or {}
+        cache.set(key, stats, 3600)
+    return stats or None
 
 
 def _create_pin_feed_note(pin):
@@ -617,6 +668,86 @@ def pin_toggle(request, pk):
         pin.is_pinned = not pin.is_pinned
         pin.save(update_fields=["is_pinned"])
     return redirect(pin.historie_url())
+
+
+def _weekly_progression(daily, doy_from, doy_to, roky):
+    """
+    Per-week means over the pin's doy range across its year window, with
+    week-over-week deltas (°C/mm and %, per the dashboard delta convention).
+    Feeds the printable "postupnost" table on Subhistorie.
+    """
+    current_year = max((r["year"] for r in daily), default=None)
+    if current_year is None:
+        return []
+    buckets = defaultdict(list)
+    for r in daily:
+        if r["value"] is None:
+            continue
+        x = int(r["x"])
+        if doy_from <= x <= doy_to and r["year"] > current_year - roky:
+            buckets[(x - 1) // 7].append(r["value"])
+
+    weeks = []
+    prev = None
+    for wk in sorted(buckets):
+        vals = buckets[wk]
+        avg = sum(vals) / len(vals)
+        # Week label from the non-leap reference year parse_dm uses
+        start = date(2001, 1, 1) + timedelta(days=wk * 7)
+        end = start + timedelta(days=6)
+        delta = delta_pct = None
+        if prev is not None:
+            delta = round(avg - prev, 1)
+            delta_pct = round((avg - prev) / abs(prev) * 100) if abs(prev) >= 0.05 else None
+        weeks.append({
+            "label": f"{start.day}. {start.month}. – {end.day}. {end.month}.",
+            "avg": round(avg, 1),
+            "min": round(min(vals), 1),
+            "max": round(max(vals), 1),
+            "delta": delta,
+            "delta_pct": delta_pct,
+        })
+        prev = avg
+    return weeks
+
+
+@login_required
+def subhistorie(request):
+    """
+    All pins in one printable place — no bod/metric context filter. Each pin
+    shows its comment, stats and the weekly progression table computed from
+    the same daily series rules as everywhere else. One series query per
+    distinct (sel, metric) pair, shared across pins.
+    """
+    pin_rows = list(
+        HistoriePin.objects.select_related("author")
+        .filter(is_hidden=False)
+        .order_by("-created_at")
+    )
+    series_by_key = {}
+    entries = []
+    for pin in pin_rows:
+        f, t = parse_dm(pin.od), parse_dm(pin.do)
+        if f is None or t is None:
+            continue
+        if f > t:
+            f, t = t, f
+        key = (pin.sel, pin.metric)
+        if key not in series_by_key:
+            series_by_key[key] = _historical_series(
+                granularity="d", metric=pin.metric, **_pin_series_target(pin.sel),
+            )
+        daily = series_by_key[key]
+        entries.append({
+            "pin": pin,
+            "stats": _stats_from_daily(daily, f, t, pin.roky),
+            "weeks": _weekly_progression(daily, f, t, pin.roky),
+            "can_modify": _can_modify(request.user, pin),
+        })
+    return render(request, "notes/subhistorie.html", {
+        "entries": entries,
+        "user_can_pin": _can_pin(request.user),
+    })
 
 
 # ── Revision tracker ────────────────────────────────────────────────────────
@@ -1439,10 +1570,11 @@ def historie(request):
         "selection_label": selection_label,
         "pins": pins,
         "user_can_pin": _can_pin(request.user),
-        # Slim marker payload for the chart JS (id/x for placement, the rest
-        # feeds the hover text)
+        # Slim marker payload for the chart JS (x for placement, x0/x1 for
+        # the selected-pin range shading, the rest feeds the hover text)
         "pins_marker": [
-            {"id": p["id"], "x": p["x"], "author": p["author"], "od": p["od"], "do": p["do"]}
+            {"id": p["id"], "x": p["x"], "x0": p["x0"], "x1": p["x1"],
+             "author": p["author"], "od": p["od"], "do": p["do"]}
             for p in pins
         ],
     })

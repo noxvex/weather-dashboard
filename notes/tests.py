@@ -539,3 +539,80 @@ class PinPermissionsTest(TestCase):
         self.client.post(reverse("pin_toggle", args=[self.pin.pk]))
         self.pin.refresh_from_db()
         self.assertTrue(self.pin.is_pinned)
+
+
+class HistoriePinsRoundTwoTest(TestCase):
+    """
+    Fixes from the first live feedback round: manual-comparison params must
+    survive every view switch, pins are unlimited, the feed card carries the
+    stats table, and Subhistorie lists all pins with weekly progression.
+    """
+
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(username="round2", password="x")
+        self.client.force_login(self.user)
+        self.point = WeatherPoint.objects.create(
+            name="Testov", region="Test", country="CZ", latitude=50.0, longitude=15.0,
+        )
+        today = date.today()
+        # Three weeks of daily June data across 2 years (covers od=1.6 do=21.6),
+        # temps rising day by day so weekly deltas come out positive
+        for year in (today.year - 1, today.year):
+            for day in range(1, 22):
+                HistoricalActual.objects.create(
+                    point=self.point, date=date(year, 6, day),
+                    temp_min=10.0 + day * 0.2, temp_max=20.0 + day * 0.2, precip_mm=1.0,
+                )
+
+    def test_switches_keep_manual_comparison_params(self):
+        resp = self.client.get("/historie/?rozsah=vlastni&od=1.6&do=21.6&roky=8&bod=cz&m=t")
+        html = resp.content.decode().replace("&amp;", "&")
+        # rezim toggle keeps od/do/roky (this was the "roky jumps back to 5" bug)
+        self.assertIn("rezim=pct&od=1.6&do=21.6&roky=8", html)
+        # seg links keep them too
+        self.assertIn("rozsah=plna&od=1.6&do=21.6&roky=8", html)
+        # bod/metric selects submit them as hidden inputs
+        self.assertIn('name="roky" value="8"', html)
+        self.assertIn('name="od" value="1.6"', html)
+
+    def test_pins_unlimited_and_marker_payload_has_range(self):
+        for i in range(35):
+            HistoriePin.objects.create(
+                author=self.user, body=f"pin {i}", sel="cz",
+                od="1.6", do="21.6", roky=5, metric="t",
+            )
+        resp = self.client.get("/historie/?rozsah=vlastni&od=1.6&do=21.6&roky=5&bod=cz&m=t")
+        self.assertEqual(len(resp.context["pins"]), 35)
+        marker = resp.context["pins_marker"][0]
+        self.assertIn("x0", marker)
+        self.assertIn("x1", marker)
+
+    def test_feed_card_shows_stats_table(self):
+        self.client.post(reverse("pin_create"), {
+            "sel": "cz", "od": "1.6", "do": "21.6", "roky": 5, "metric": "t",
+            "body": "pin s tabulkou", "show_in_feed": "on",
+        })
+        html = self.client.get(reverse("notes:aktuality")).content.decode()
+        self.assertIn("pin s tabulkou", html)
+        self.assertIn("Průměr", html)
+        self.assertIn("Odchylka", html)
+
+    def test_subhistorie_lists_all_pins_with_weekly_progression(self):
+        HistoriePin.objects.create(
+            author=self.user, body="cz pin", sel="cz",
+            od="1.6", do="21.6", roky=5, metric="t",
+        )
+        HistoriePin.objects.create(
+            author=self.user, body="sk pin", sel="sk",
+            od="1.6", do="21.6", roky=5, metric="t",
+        )
+        resp = self.client.get(reverse("subhistorie"))
+        html = resp.content.decode()
+        self.assertEqual(resp.status_code, 200)
+        # No bod/metric context filter — both pins visible on one page
+        self.assertIn("cz pin", html)
+        self.assertIn("sk pin", html)
+        self.assertIn("Změna proti předchozímu týdnu", html)
+        # Rising temps → at least one red ▲ delta rendered
+        self.assertIn("delta-pos", html)
