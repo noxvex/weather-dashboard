@@ -61,3 +61,64 @@ class Note(models.Model):
     @property
     def is_system(self):
         return self.note_type != self.TYPE_HUMAN
+
+
+class HistoriePin(models.Model):
+    """
+    A saved comparison on the Historie page: the manual-comparison form's
+    parameters (bod/od/do/roky/metrika) plus a user comment, shown as a
+    marker on the Historie chart. Lifecycle mirrors Note: unpinned pins are
+    soft-deleted at 14 days and hard-deleted at 30 by prune_notes; pins with
+    is_pinned=True (leader/admin) are exempt and live until unpinned.
+    """
+    METRIC_TEMP = "t"
+    METRIC_PRECIP = "p"
+    METRIC_CHOICES = [
+        (METRIC_TEMP, "Teplota (°C)"),
+        (METRIC_PRECIP, "Srážky (mm)"),
+    ]
+
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="historie_pins",
+    )
+    body = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_pinned = models.BooleanField(default=False)
+    is_hidden = models.BooleanField(default=False)
+
+    # Comparison params stored in the exact format of the Historie GET params
+    # (bod/od/do/roky/m) — a deep link back is a plain urlencode of these.
+    sel = models.CharField(max_length=10)                # "cz" / "sk" / WeatherPoint pk
+    od = models.CharField(max_length=10)                 # day.month, e.g. "12.7"
+    do = models.CharField(max_length=10)                 # day.month, e.g. "15.11"
+    roky = models.PositiveSmallIntegerField(default=5)   # 2–12, validated in the form
+    metric = models.CharField(max_length=1, choices=METRIC_CHOICES, default=METRIC_TEMP)
+
+    # Scope: True = also cross-post a summary card into the Aktuality feed
+    show_in_feed = models.BooleanField(default=True)
+    # The cross-posted feed card. SET_NULL so deleting the card in the feed
+    # doesn't take the pin with it; pin deletion removes the card via delete().
+    feed_note = models.OneToOneField(
+        Note,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="historie_pin",
+    )
+
+    class Meta:
+        ordering = ["-is_pinned", "-created_at"]
+        indexes = [
+            models.Index(fields=["sel", "metric"]),
+        ]
+
+    def delete(self, *args, **kwargs):
+        # The feed card has no reason to outlive its pin.
+        if self.feed_note_id:
+            self.feed_note.delete()
+        return super().delete(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.author.username} pin [{self.sel} {self.od}–{self.do}] — {self.created_at:%Y-%m-%d %H:%M}"
