@@ -58,7 +58,13 @@ Repo: `noxvex/weather-dashboard` (public). Live: `weather-dashboard-production-6
   both services are in the same region.
 - Whitenoise/static files: `collectstatic` must run in the `web:` Procfile
   line, not Pre-deploy Command (Pre-deploy runs in an ephemeral container,
-  changes don't persist). Migrations correctly go in Pre-deploy Command.
+  changes don't persist).
+- FIXED (2026-07-14): Procfile's `release:` phase is not supported by
+  Railpack (Railway's builder) — it was silently never executed, so
+  migrations were likely only ever applied manually via `railway ssh`,
+  not automatically on deploy. `migrate --noinput` now runs as the first
+  step of the `web:` line instead, before collectstatic/gunicorn, so it
+  executes on every deploy.
 - Plotly `<script>` tag must never have `defer` — causes charts to silently
   not render.
 - ERA5 precipitation aggregates as SUM, temperature as MEAN — don't conflate.
@@ -156,6 +162,11 @@ DONE (verified live on production):
   Tests: RunFrequentIngestTest, RunDailyIngestTest in ingest/tests.py
   (mock call_command to confirm a raised exception on one step doesn't
   stop the others).
+- Fixed Procfile: dropped the `release:` line (Railpack doesn't support
+  it, so migrations were silently never auto-applied on deploy) and
+  moved `migrate --noinput` into the `web:` line, running before
+  collectstatic/gunicorn. Migrations now run automatically on every
+  deploy instead of needing manual `railway ssh` runs.
 
 NOT YET DONE / KNOWN BROKEN (going into next session):
 - No Railway cron/worker service yet for `ingest_weather` OR
