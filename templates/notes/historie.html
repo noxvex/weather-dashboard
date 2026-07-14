@@ -42,22 +42,28 @@
     z historických dat ERA5 · {{ selection_label }}
 </p>
 
+{# Carried through every control so switching view never resets the manual comparison #}
+{% with keep="&od="|add:od|add:"&do="|add:do %}
 {# ── Range bars: recent spans vs full multi-year history ── #}
 <div class="seg" style="max-width:640px;">
     <a class="seg-link seg-short {% if rozsah == 'kratka' %}on{% endif %}"
-       href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah=kratka">Krátkodobá<small>16 dní</small></a>
+       href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah=kratka{{ keep }}&roky={{ roky }}">Krátkodobá<small>16 dní</small></a>
     <a class="seg-link seg-mid {% if rozsah == 'stredni' %}on{% endif %}"
-       href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah=stredni">Střednědobá<small>4 měsíce</small></a>
+       href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah=stredni{{ keep }}&roky={{ roky }}">Střednědobá<small>4 měsíce</small></a>
     <a class="seg-link seg-long {% if rozsah == 'dlouha' %}on{% endif %}"
-       href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah=dlouha">Dlouhodobá<small>7 měsíců</small></a>
+       href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah=dlouha{{ keep }}&roky={{ roky }}">Dlouhodobá<small>7 měsíců</small></a>
     <a class="seg-link seg-full {% if rozsah == 'plna' %}on{% endif %}"
-       href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah=plna">Celá historie<small>od 2015 · překryv let</small></a>
+       href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah=plna{{ keep }}&roky={{ roky }}">Celá historie<small>od 2015 · překryv let</small></a>
 </div>
+{% endwith %}
 
 {# ── Controls: point + metric + granularity (+ rezim for full history) ── #}
 <form method="get" id="hist-form" style="margin-bottom:0; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
     <input type="hidden" name="rozsah" value="{{ rozsah }}">
     <input type="hidden" name="rezim" value="{{ rezim }}">
+    <input type="hidden" name="od" value="{{ od }}">
+    <input type="hidden" name="do" value="{{ do }}">
+    <input type="hidden" name="roky" value="{{ roky }}">
     <select name="bod" class="point-select" onchange="histSubmit(this.form)">
         <option value="cz" {% if sel == "cz" %}selected{% endif %}>ČR — národní průměr</option>
         <option value="sk" {% if sel == "sk" %}selected{% endif %}>SR — národní průměr</option>
@@ -133,9 +139,9 @@
     <button type="button" class="mode-btn" data-mode="b" onclick="setHistMode('b')">Barevně odlišit roky</button>
     <span style="width:14px;"></span>
     <a class="mode-btn {% if rezim == 'abs' %}active{% endif %}"
-       href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah=plna&rezim=abs">Hodnoty</a>
+       href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah={{ rozsah }}&rezim=abs&od={{ od }}&do={{ do }}&roky={{ roky }}">Hodnoty</a>
     <a class="mode-btn {% if rezim == 'pct' %}active{% endif %}"
-       href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah=plna&rezim=pct">Rozdíl % · podobnost</a>
+       href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah=plna&rezim=pct&od={{ od }}&do={{ do }}&roky={{ roky }}">Rozdíl % · podobnost</a>
 </div>
 {% endif %}
 
@@ -167,7 +173,10 @@
 {% if pins %}
 {# ── Pins for the current bod+metric — click ↔ marker highlight in the chart ── #}
 <div class="card" style="margin-top:14px;">
-    <div class="card-title">📌 Piny pro tento výběr · {{ pins|length }}</div>
+    <div class="card-title" style="display:flex; align-items:baseline; gap:10px;">
+        📌 Piny pro tento výběr · {{ pins|length }}
+        <a href="{% url 'subhistorie' %}" style="margin-left:auto; color:var(--accent); font-size:12.5px; font-weight:400;">Všechny piny → Subhistorie</a>
+    </div>
     <div id="pin-list" style="max-height:280px; overflow-y:auto; display:flex; flex-direction:column; gap:8px;">
         {% for p in pins %}
         <div class="pin-item" data-pin-id="{{ p.id }}" onclick="selectPin({{ p.id }}, false)">
@@ -408,6 +417,18 @@ function selectPin(id, fromChart) {
         const shown = pinData
             .map(p => ({ p: p, y: nearestY(p.x) }))
             .filter(o => o.y !== null && o.y !== undefined);
+        // Stack markers with (nearly) the same x — otherwise pins on the
+        // same period draw on top of each other and look like one pin
+        let vLo = Infinity, vHi = -Infinity;
+        raw.years.forEach(yr => yr.values.forEach(v => { if (v < vLo) vLo = v; if (v > vHi) vHi = v; }));
+        const vStep = (vHi > vLo ? vHi - vLo : 10) * 0.055;
+        const xThresh = daily ? 4 : 1;
+        let clusterSize = 0, lastX = null;
+        shown.slice().sort((a, b) => a.p.x - b.p.x).forEach(o => {
+            clusterSize = (lastX !== null && o.p.x - lastX <= xThresh) ? clusterSize + 1 : 0;
+            lastX = o.p.x;
+            o.y += clusterSize * vStep;
+        });
         if (shown.length) {
             const pinTraceIndex = traces.length;
             Plotly.addTraces('hist-chart', [{
@@ -426,6 +447,14 @@ function selectPin(id, fromChart) {
             window.highlightPinMarker = function (id) {
                 const sizes = shown.map(o => (o.p.id === id ? 22 : 15));
                 Plotly.restyle('hist-chart', { 'textfont.size': [sizes] }, [pinTraceIndex]);
+                // Light background shading of the selected pin's od–do range
+                const sel = pinData.find(p => p.id === id);
+                Plotly.relayout('hist-chart', { shapes: sel ? [{
+                    type: 'rect', xref: 'x', yref: 'paper',
+                    x0: sel.x0, x1: sel.x1, y0: 0, y1: 1,
+                    fillcolor: 'rgba(74, 158, 255, 0.07)',
+                    line: { width: 0 }, layer: 'below',
+                }] : [] });
             };
         }
     }

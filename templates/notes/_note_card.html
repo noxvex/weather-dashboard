@@ -49,6 +49,29 @@ summary + deep link back to the exact comparison.
             📌 {{ note.historie_pin.summary_label }}
             · <a href="{{ note.historie_pin.historie_url }}" style="color:var(--accent);">Otevřít v Historii →</a>
         </div>
+        {% if note.pin_stats %}
+        <table class="pin-stats" style="border-collapse:collapse; font-size:12.5px; margin-top:6px;">
+            <tr>
+                <th style="color:var(--muted); font-weight:500; text-align:left; padding:2px 16px 2px 0;">Min</th>
+                <th style="color:var(--muted); font-weight:500; text-align:left; padding:2px 16px 2px 0;">Max</th>
+                <th style="color:var(--muted); font-weight:500; text-align:left; padding:2px 16px 2px 0;">Průměr</th>
+                <th style="color:var(--muted); font-weight:500; text-align:left; padding:2px 16px 2px 0;">Odchylka</th>
+            </tr>
+            <tr>
+                {% if note.historie_pin.metric == "p" %}
+                <td style="padding:2px 16px 2px 0;">{{ note.pin_stats.min }} mm</td>
+                <td style="padding:2px 16px 2px 0;">{{ note.pin_stats.max }} mm</td>
+                <td style="padding:2px 16px 2px 0;">{{ note.pin_stats.avg }} mm</td>
+                <td style="padding:2px 16px 2px 0;">± {{ note.pin_stats.std }} mm</td>
+                {% else %}
+                <td style="padding:2px 16px 2px 0;">{{ note.pin_stats.min }} °C</td>
+                <td style="padding:2px 16px 2px 0;">{{ note.pin_stats.max }} °C</td>
+                <td style="padding:2px 16px 2px 0;">{{ note.pin_stats.avg }} °C</td>
+                <td style="padding:2px 16px 2px 0;">± {{ note.pin_stats.std }} °C</td>
+                {% endif %}
+            </tr>
+        </table>
+        {% endif %}
     {% endif %}
 
     {% if not hide_actions %}

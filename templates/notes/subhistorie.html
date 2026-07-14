@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+
+{% block title %}Subhistorie — Weather Dashboard{% endblock %}
+
+{% block extra_head %}
+<style>
+.sub-entry { margin-bottom: 16px; }
+.sub-params { color: var(--muted); font-size: 13px; margin: 2px 0 8px; }
+.sub-table { border-collapse: collapse; font-size: 13px; width: 100%; max-width: 560px; }
+.sub-table th {
+    color: var(--muted); font-weight: 500; text-align: left;
+    padding: 5px 14px 5px 0; border-bottom: 1px solid var(--border);
+}
+.sub-table td { padding: 5px 14px 5px 0; border-bottom: 1px solid var(--border); color: var(--text); }
+.sub-table tr:last-child td { border-bottom: none; }
+.sub-stats { display: flex; gap: 22px; flex-wrap: wrap; margin: 8px 0 10px; font-size: 13px; }
+.sub-stats b { color: var(--text); font-weight: 600; }
+.sub-stats span { color: var(--muted); }
+{# Print: white paper, black ink, no nav/buttons — the tables are the point #}
+@media print {
+    nav, .no-print { display: none !important; }
+    body { background: #fff !important; color: #000 !important; }
+    .card, .sub-entry, .eyebrow, .page-sub, .card-title,
+    .sub-table td, .sub-table th, .sub-params, .sub-stats b, .sub-stats span {
+        background: #fff !important; color: #000 !important;
+        border-color: #bbb !important; box-shadow: none !important;
+    }
+    .card { break-inside: avoid; }
+    .delta-pos, .delta-neg { color: #000 !important; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="eyebrow">Subhistorie</div>
+<p class="page-sub" style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+    Všechny piny se souhrnnými daty a týdenní postupností — bez grafu, k tisku
+    <button type="button" class="mode-btn no-print" onclick="window.print()">🖨 Vytisknout</button>
+</p>
+
+{% if not entries %}
+<div class="card">
+    <div class="coming-soon">
+        <span class="cs-icon">📌</span>
+        <h3>Zatím žádné piny</h3>
+        <p>Piny vytvoříte na Historii přes Vlastní srovnání → Přidat pin.</p>
+    </div>
+</div>
+{% endif %}
+
+{% for e in entries %}
+<div class="card sub-entry">
+    <div class="card-title" style="display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;">
+        📌 {{ e.pin.selection_label }}
+        <span style="color:var(--muted); font-weight:400; font-size:13px;">
+            {{ e.pin.od }} – {{ e.pin.do }} · posledních {{ e.pin.roky }} let ·
+            {% if e.pin.metric == "p" %}srážky{% else %}teplota{% endif %}
+        </span>
+        {% if e.pin.is_pinned %}<span style="color:var(--accent);" title="Připnuto — nevyprší">∞</span>{% endif %}
+        <a href="{{ e.pin.historie_url }}" class="no-print" style="margin-left:auto; color:var(--accent); font-size:12.5px; font-weight:400;">Otevřít v grafu →</a>
+    </div>
+    <div class="sub-params">
+        {{ e.pin.author.username }} · {{ e.pin.created_at|date:"j. n. Y, H:i" }} — {{ e.pin.body }}
+    </div>
+
+    {% if e.stats %}
+    <div class="sub-stats">
+        {% if e.pin.metric == "p" %}
+        <span>Min <b>{{ e.stats.min }} mm</b></span>
+        <span>Max <b>{{ e.stats.max }} mm</b></span>
+        <span>Průměr <b>{{ e.stats.avg }} mm</b></span>
+        <span>Odchylka <b>± {{ e.stats.std }} mm</b></span>
+        {% else %}
+        <span>Min <b>{{ e.stats.min }} °C</b></span>
+        <span>Max <b>{{ e.stats.max }} °C</b></span>
+        <span>Průměr <b>{{ e.stats.avg }} °C</b></span>
+        <span>Odchylka <b>± {{ e.stats.std }} °C</b></span>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if e.weeks %}
+    <table class="sub-table">
+        <tr>
+            <th>Týden</th>
+            <th>Průměr</th>
+            <th>Změna proti předchozímu týdnu</th>
+            <th>Min</th>
+            <th>Max</th>
+        </tr>
+        {% for w in e.weeks %}
+        <tr>
+            <td>{{ w.label }}</td>
+            <td>{{ w.avg }} {% if e.pin.metric == "p" %}mm{% else %}°C{% endif %}</td>
+            <td>
+                {% if forloop.first %}
+                    <span style="color:var(--muted);">—</span>
+                {% elif w.delta > 0 %}
+                    <span class="delta-pos">▲ +{{ w.delta }} {% if e.pin.metric == "p" %}mm{% else %}°C{% endif %}{% if w.delta_pct is not None %} · +{{ w.delta_pct }} %{% endif %}</span>
+                {% elif w.delta < 0 %}
+                    <span class="delta-neg">▼ {{ w.delta }} {% if e.pin.metric == "p" %}mm{% else %}°C{% endif %}{% if w.delta_pct is not None %} · {{ w.delta_pct }} %{% endif %}</span>
+                {% else %}
+                    <span class="delta-zero">0</span>
+                {% endif %}
+            </td>
+            <td>{{ w.min }} {% if e.pin.metric == "p" %}mm{% else %}°C{% endif %}</td>
+            <td>{{ w.max }} {% if e.pin.metric == "p" %}mm{% else %}°C{% endif %}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% else %}
+    <div style="color:var(--muted); font-size:13px;">Pro rozsah pinu nejsou historická data.</div>
+    {% endif %}
+</div>
+{% endfor %}
+
+{% endblock %}
