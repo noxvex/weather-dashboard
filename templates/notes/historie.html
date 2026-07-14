@@ -177,6 +177,26 @@
                 {% if p.is_pinned %}<span style="color:var(--accent);" title="Připnuto — nevyprší">∞</span>{% endif %}
             </div>
             <div style="color:var(--text); font-size:13px; margin-top:4px;">{{ p.body }}</div>
+            {% if p.can_modify or user_can_pin %}
+            <div style="display:flex; gap:8px; margin-top:8px; align-items:center;" onclick="event.stopPropagation()">
+                {% if p.can_modify %}
+                    <a href="{% url 'pin_edit' p.id %}" class="act-btn">Upravit</a>
+                    <form method="post" action="{% url 'pin_delete' p.id %}" style="display:inline;">
+                        {% csrf_token %}
+                        <button type="submit" class="act-btn danger"
+                                onclick="return confirm('Smazat tento pin?')">Smazat</button>
+                    </form>
+                {% endif %}
+                {% if user_can_pin %}
+                    <form method="post" action="{% url 'pin_toggle' p.id %}" style="display:inline; margin-left:auto;">
+                        {% csrf_token %}
+                        <button type="submit" class="act-btn {% if p.is_pinned %}is-pinned{% endif %}">
+                            {% if p.is_pinned %}Odepnout{% else %}Připnout{% endif %}
+                        </button>
+                    </form>
+                {% endif %}
+            </div>
+            {% endif %}
             <div class="pin-detail" id="pin-detail-{{ p.id }}" hidden style="margin-top:8px;">
                 {% if p.stats %}
                 <table class="pin-stats">

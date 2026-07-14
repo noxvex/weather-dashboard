@@ -20,7 +20,7 @@
             {% endif %}
             <div style="display:flex; gap:0.75rem; margin-top:1.25rem;">
                 <button type="submit" class="btn btn-primary">Uložit</button>
-                <a href="{% url 'notes:aktuality' %}" class="btn btn-ghost">Zrušit</a>
+                <a href="{% if cancel_url %}{{ cancel_url }}{% else %}{% url 'notes:aktuality' %}{% endif %}" class="btn btn-ghost">Zrušit</a>
             </div>
         </form>
     </div>
