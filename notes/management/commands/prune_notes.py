@@ -1,9 +1,9 @@
 """
-Daily lifecycle management for notes:
-  - Soft-delete: unpinned notes ≥14 days old are marked is_hidden=True and
-    disappear from the feed while remaining in the DB (audit trail).
-  - Hard-delete: unpinned notes ≥30 days old are permanently removed from the DB.
-Pinned notes are exempt from both steps — they survive until manually unpinned.
+Daily lifecycle management for notes and Historie pins:
+  - Soft-delete: unpinned items ≥14 days old are marked is_hidden=True and
+    disappear from the feed/chart while remaining in the DB (audit trail).
+  - Hard-delete: unpinned items ≥30 days old are permanently removed from the DB.
+Pinned items are exempt from both steps — they survive until manually unpinned.
 Safe to run multiple times (idempotent).
 """
 from datetime import timedelta
@@ -11,14 +11,14 @@ from datetime import timedelta
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from notes.models import Note
+from notes.models import HistoriePin, Note
 
 SOFT_DELETE_DAYS = 14
 HARD_DELETE_DAYS = 30
 
 
 class Command(BaseCommand):
-    help = "Soft-delete notes older than 14 days; hard-delete notes older than 30 days (unpinned only)."
+    help = "Soft-delete notes/pins older than 14 days; hard-delete older than 30 days (unpinned only)."
 
     def handle(self, *args, **options):
         now = timezone.now()
@@ -34,9 +34,21 @@ class Command(BaseCommand):
             is_pinned=False, is_hidden=False, created_at__lt=soft_cutoff,
         ).update(is_hidden=True)
 
+        # HistoriePin: same lifecycle, same cutoffs. Queryset delete on
+        # purpose — it skips HistoriePin.delete()'s feed-card cascade, so an
+        # expiring pin does NOT take its Aktuality card down with it; the
+        # card is a Note with its own (possibly pinned) lifecycle above.
+        pin_hard, _ = HistoriePin.objects.filter(
+            is_pinned=False, created_at__lt=hard_cutoff,
+        ).delete()
+        pin_soft = HistoriePin.objects.filter(
+            is_pinned=False, is_hidden=False, created_at__lt=soft_cutoff,
+        ).update(is_hidden=True)
+
         self.stdout.write(
             self.style.SUCCESS(
                 f"prune_notes: {soft_count} soft-deleted (≥{SOFT_DELETE_DAYS}d), "
-                f"{hard_count} hard-deleted (≥{HARD_DELETE_DAYS}d)."
+                f"{hard_count} hard-deleted (≥{HARD_DELETE_DAYS}d); "
+                f"pins: {pin_soft} soft, {pin_hard} hard."
             )
         )

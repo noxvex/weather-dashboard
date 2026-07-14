@@ -5,14 +5,17 @@ so the same class of bug gets caught automatically instead of by hand.
 """
 import re
 from datetime import date, timedelta
+from io import StringIO
 
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
+from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
 from ingest.models import DailyForecast, HistoricalActual, MediumLongRangeForecast, WeatherPoint
+from notes.models import HistoriePin, Note
 from notes.templatetags.weather_tags import fc_fill_style
 
 User = get_user_model()
@@ -377,3 +380,162 @@ class RevisionTrackerMlrBucketTest(TestCase):
         )
         resp = self._get("strednedobe")
         self.assertTrue(resp.context["not_enough_data"])
+
+
+class HistoriePinLifecycleTest(TestCase):
+    """
+    Pins share the notes lifecycle run by prune_notes: unpinned pins are
+    soft-hidden at 14 days and hard-deleted at 30; pinned pins are exempt.
+    A pin expiring must NOT take its cross-posted Aktuality card with it
+    (the card has its own lifecycle) — only explicit deletion cascades.
+    """
+
+    def setUp(self):
+        self.author = User.objects.create_user(username="pinworker", password="x")
+
+    def _pin(self, days_old, is_pinned=False):
+        pin = HistoriePin.objects.create(
+            author=self.author, body="test pin", sel="cz",
+            od="1.6", do="31.8", roky=5, metric="t",
+        )
+        # created_at is auto_now_add — backdate via queryset update
+        HistoriePin.objects.filter(pk=pin.pk).update(
+            created_at=timezone.now() - timedelta(days=days_old),
+            is_pinned=is_pinned,
+        )
+        pin.refresh_from_db()
+        return pin
+
+    def test_unpinned_pin_soft_hidden_after_14_days(self):
+        old = self._pin(15)
+        fresh = self._pin(3)
+        call_command("prune_notes", stdout=StringIO())
+        old.refresh_from_db()
+        fresh.refresh_from_db()
+        self.assertTrue(old.is_hidden)
+        self.assertFalse(fresh.is_hidden)
+
+    def test_pinned_pin_survives_forever(self):
+        pin = self._pin(400, is_pinned=True)
+        call_command("prune_notes", stdout=StringIO())
+        pin.refresh_from_db()
+        self.assertFalse(pin.is_hidden)
+
+    def test_unpinned_pin_hard_deleted_after_30_days_card_survives(self):
+        pin = self._pin(31)
+        card = Note.objects.create(author=self.author, body="test pin")
+        HistoriePin.objects.filter(pk=pin.pk).update(feed_note=card)
+        Note.objects.filter(pk=card.pk).update(is_pinned=True)
+        call_command("prune_notes", stdout=StringIO())
+        self.assertFalse(HistoriePin.objects.filter(pk=pin.pk).exists())
+        self.assertTrue(Note.objects.filter(pk=card.pk).exists())
+
+    def test_explicit_delete_cascades_to_card(self):
+        pin = self._pin(1)
+        card = Note.objects.create(author=self.author, body="test pin")
+        pin.feed_note = card
+        pin.save(update_fields=["feed_note"])
+        pin.delete()
+        self.assertFalse(Note.objects.filter(pk=card.pk).exists())
+
+    def test_hidden_pin_leaves_pins_context(self):
+        from notes.views import _pins_context
+        visible = self._pin(3)
+        hidden = self._pin(15)
+        call_command("prune_notes", stdout=StringIO())
+        pins = _pins_context(
+            self.author, sel="cz", metric="t", gran="d",
+            country="CZ", point_id=None, rows=[],
+        )
+        ids = [p["id"] for p in pins]
+        self.assertIn(visible.pk, ids)
+        self.assertNotIn(hidden.pk, ids)
+
+
+class PinCreateViewTest(TestCase):
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="creator", password="x")
+        self.client.force_login(self.user)
+        self.params = {
+            "sel": "cz", "od": "1.6", "do": "31.8", "roky": 5,
+            "metric": "t", "body": "Kouknětě na tyhle data...",
+        }
+
+    def test_create_with_feed_cross_posts(self):
+        resp = self.client.post(reverse("pin_create"), {**self.params, "show_in_feed": "on"})
+        self.assertEqual(resp.status_code, 302)
+        pin = HistoriePin.objects.get()
+        self.assertEqual(pin.author, self.user)
+        self.assertTrue(pin.show_in_feed)
+        self.assertIsNotNone(pin.feed_note)
+        self.assertEqual(pin.feed_note.body, pin.body)
+        self.assertEqual(pin.feed_note.country, Note.COUNTRY_CZ)
+
+    def test_create_historie_only_makes_no_note(self):
+        self.client.post(reverse("pin_create"), self.params)
+        pin = HistoriePin.objects.get()
+        self.assertFalse(pin.show_in_feed)
+        self.assertEqual(Note.objects.count(), 0)
+
+    def test_tampered_params_rejected(self):
+        resp = self.client.post(reverse("pin_create"), {**self.params, "od": "99.99"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(HistoriePin.objects.count(), 0)
+
+    def test_requires_login(self):
+        self.client.logout()
+        resp = self.client.post(reverse("pin_create"), self.params)
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(HistoriePin.objects.count(), 0)
+
+
+class PinPermissionsTest(TestCase):
+    """Author edits/deletes their own pin; leader/admin any; pin toggle is
+    leader/admin only. Mirrors the Aktuality notes rules (_can_modify/_can_pin)."""
+
+    def setUp(self):
+        self.author = User.objects.create_user(username="autor", password="x")
+        self.other = User.objects.create_user(username="cizi", password="x")
+        self.leader = User.objects.create_user(username="vedouci", password="x", role="leader")
+        self.pin = HistoriePin.objects.create(
+            author=self.author, body="original", sel="cz",
+            od="1.6", do="31.8", roky=5, metric="t",
+        )
+
+    def test_stranger_cannot_edit_or_delete(self):
+        self.client.force_login(self.other)
+        self.assertEqual(self.client.get(reverse("pin_edit", args=[self.pin.pk])).status_code, 404)
+        self.assertEqual(self.client.post(reverse("pin_delete", args=[self.pin.pk])).status_code, 404)
+        self.assertTrue(HistoriePin.objects.filter(pk=self.pin.pk).exists())
+
+    def test_author_can_delete_own(self):
+        self.client.force_login(self.author)
+        resp = self.client.post(reverse("pin_delete", args=[self.pin.pk]))
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(HistoriePin.objects.filter(pk=self.pin.pk).exists())
+
+    def test_leader_can_delete_any(self):
+        self.client.force_login(self.leader)
+        self.client.post(reverse("pin_delete", args=[self.pin.pk]))
+        self.assertFalse(HistoriePin.objects.filter(pk=self.pin.pk).exists())
+
+    def test_edit_syncs_feed_card_body(self):
+        card = Note.objects.create(author=self.author, body="original")
+        self.pin.feed_note = card
+        self.pin.save(update_fields=["feed_note"])
+        self.client.force_login(self.author)
+        resp = self.client.post(reverse("pin_edit", args=[self.pin.pk]), {"body": "upraveno"})
+        self.assertEqual(resp.status_code, 302)
+        self.pin.refresh_from_db()
+        card.refresh_from_db()
+        self.assertEqual(self.pin.body, "upraveno")
+        self.assertEqual(card.body, "upraveno")
+
+    def test_toggle_leader_only(self):
+        self.client.force_login(self.author)
+        self.assertEqual(self.client.post(reverse("pin_toggle", args=[self.pin.pk])).status_code, 404)
+        self.client.force_login(self.leader)
+        self.client.post(reverse("pin_toggle", args=[self.pin.pk]))
+        self.pin.refresh_from_db()
+        self.assertTrue(self.pin.is_pinned)

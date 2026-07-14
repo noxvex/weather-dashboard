@@ -64,3 +64,17 @@ class HistoriePinForm(forms.ModelForm):
         if sel.isdigit() and WeatherPoint.objects.filter(pk=sel).exists():
             return sel
         raise forms.ValidationError("Neplatný bod.")
+
+
+class PinEditForm(forms.ModelForm):
+    """Editing an existing pin only touches the comment — the comparison
+    params are the pin's identity."""
+    class Meta:
+        model = HistoriePin
+        fields = ["body"]
+        widgets = {
+            "body": forms.Textarea(attrs={"rows": 4}),
+        }
+        labels = {
+            "body": "Text pinu",
+        }

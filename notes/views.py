@@ -16,7 +16,7 @@ from django.http import Http404, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 
 from ingest.models import DailyForecast, HistoricalActual, MediumLongRangeForecast, WeatherPoint
-from .forms import HistoriePinForm, NoteForm
+from .forms import HistoriePinForm, NoteForm, PinEditForm
 from .models import HistoriePin, Note
 from .utils import parse_dm
 
@@ -570,6 +570,52 @@ def pin_create(request):
     pin.save()
     if pin.show_in_feed:
         _create_pin_feed_note(pin)
+    return redirect(pin.historie_url())
+
+
+@login_required
+def pin_edit(request, pk):
+    pin = get_object_or_404(HistoriePin, pk=pk)
+    if not _can_modify(request.user, pin):
+        raise Http404
+
+    if request.method == "POST":
+        form = PinEditForm(request.POST, instance=pin)
+        if form.is_valid():
+            form.save()
+            # The cross-posted card carries the same comment — keep it in sync
+            if pin.feed_note_id:
+                Note.objects.filter(pk=pin.feed_note_id).update(body=pin.body)
+            return redirect(pin.historie_url())
+    else:
+        form = PinEditForm(instance=pin)
+    return render(request, "notes/note_form.html", {
+        "form": form,
+        "action": "Upravit pin",
+        "cancel_url": pin.historie_url(),
+    })
+
+
+@login_required
+def pin_delete(request, pk):
+    pin = get_object_or_404(HistoriePin, pk=pk)
+    if not _can_modify(request.user, pin):
+        raise Http404
+    url = pin.historie_url()
+    if request.method == "POST":
+        # Model delete() also removes the cross-posted Aktuality card
+        pin.delete()
+    return redirect(url)
+
+
+@login_required
+def pin_toggle(request, pk):
+    if not _can_pin(request.user):
+        raise Http404
+    pin = get_object_or_404(HistoriePin, pk=pk)
+    if request.method == "POST":
+        pin.is_pinned = not pin.is_pinned
+        pin.save(update_fields=["is_pinned"])
     return redirect(pin.historie_url())
 
 
@@ -1392,6 +1438,7 @@ def historie(request):
         "roky": roky,
         "selection_label": selection_label,
         "pins": pins,
+        "user_can_pin": _can_pin(request.user),
         # Slim marker payload for the chart JS (id/x for placement, the rest
         # feeds the hover text)
         "pins_marker": [

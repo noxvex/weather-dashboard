@@ -47,8 +47,11 @@ class RunDailyIngestTest(TestCase):
         call_command("run_daily_ingest", stdout=out)
 
         called_steps = [c.args[0] for c in mock_call_command.call_args_list]
-        self.assertEqual(called_steps, ["fetch_seasonal", "fetch_ec46", "fetch_pollen", "fetch_era5_backfill"])
-        self.assertIn("3/4 steps succeeded", out.getvalue())
+        self.assertEqual(
+            called_steps,
+            ["fetch_seasonal", "fetch_ec46", "fetch_pollen", "fetch_era5_backfill", "prune_notes"],
+        )
+        self.assertIn("4/5 steps succeeded", out.getvalue())
 
     @patch("ingest.management.commands.run_daily_ingest.call_command")
     def test_era5_backfill_called_with_rolling_start(self, mock_call_command):
