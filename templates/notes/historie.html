@@ -59,14 +59,8 @@
 
 {# Carried through every control so switching view never resets the manual comparison #}
 {% with keep="&od="|add:od|add:"&do="|add:do %}
-{# ── Range bars: recent spans vs full multi-year history ── #}
-<div class="seg" style="max-width:640px;">
-    <a class="seg-link seg-short {% if rozsah == 'kratka' %}on{% endif %}"
-       href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah=kratka{{ keep }}&roky={{ roky }}">Krátkodobá<small>16 dní</small></a>
-    <a class="seg-link seg-mid {% if rozsah == 'stredni' %}on{% endif %}"
-       href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah=stredni{{ keep }}&roky={{ roky }}">Střednědobá<small>4 měsíce</small></a>
-    <a class="seg-link seg-long {% if rozsah == 'dlouha' %}on{% endif %}"
-       href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah=dlouha{{ keep }}&roky={{ roky }}">Dlouhodobá<small>7 měsíců</small></a>
+{# ── Range bars: full multi-year history vs manual comparison ── #}
+<div class="seg" style="max-width:420px;">
     <a class="seg-link seg-full {% if rozsah == 'plna' %}on{% endif %}"
        href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah=plna{{ keep }}&roky={{ roky }}">Celá historie<small>od 2015 · překryv let</small></a>
     <a class="seg-link seg-full {% if rozsah == 'vlastni' %}on{% endif %}"
@@ -170,13 +164,10 @@
     <div class="card-title">
         {% if rozsah == "vlastni" %}
             Vlastní srovnání · {{ od }} – {{ do }} · posledních {{ roky }} let · podobnost s aktuálním rokem v legendě
-        {% elif rozsah == "plna" %}
+        {% else %}
             Roky v překryvu · {% if gran == "d" %}den v roce{% else %}týden v roce{% endif %}
             {% if rezim == "pct" %} · odchylka od průměru v %, podobnost s aktuálním rokem v legendě{% endif %}
             · kliknutím na legendu zapnete/vypnete rok
-        {% else %}
-            Skutečná data (ERA5) ·
-            {% if rozsah == "kratka" %}posledních 16 dní{% elif rozsah == "stredni" %}poslední 4 měsíce{% else %}posledních 7 měsíců{% endif %}
         {% endif %}
     </div>
     {% if has_data %}
@@ -321,27 +312,6 @@ function selectPin(id, fromChart) {
         hoverlabel: { bgcolor: '#131C2E', bordercolor: '#243044', font: { color: '#E8EDF5', size: 12 } },
     };
     const config = { displayModeBar: false, responsive: true };
-
-    if (raw.mode === 'span') {
-        // Recent actuals — simple date series colored by the horizon
-        // Keep in sync with --h-short / --h-mid / --h-long in main.css
-        const spanColors = { kratka: '#4A9EFF', stredni: '#FBBF24', dlouha: '#F472B6' };
-        const c = spanColors[raw.rozsah] || '#4A9EFF';
-        const layout = Object.assign({}, baseLayout, {
-            xaxis: {
-                gridcolor: 'rgba(36,48,68,0.6)', tickcolor: 'transparent',
-                tickfont: { size: 11, color: '#8A97AD' }, showline: false, type: 'date',
-            },
-        });
-        Plotly.newPlot('hist-chart', [{
-            x: raw.dates, y: raw.values,
-            type: 'scatter', mode: 'lines', name: 'ERA5',
-            line: { color: c, width: 2.2, shape: 'spline' },
-            fill: 'tozeroy', fillcolor: c + '1A',
-            hovertemplate: '%{y:.1f}' + (precip ? ' mm' : '°C') + '<extra>ERA5</extra>',
-        }], layout, config);
-        return;
-    }
 
     // ── Full history: multi-year overlay ──
     if (!raw.years || !raw.years.length) return;

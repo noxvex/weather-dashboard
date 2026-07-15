@@ -415,6 +415,9 @@ a:hover { text-decoration: underline; }
     padding: 6px 13px;
     border-radius: 20px;
     border: 1px solid var(--border);
+    /* transparent, not the <button> default white — white pills with muted
+       text were unreadable on the dark theme */
+    background: transparent;
     color: var(--muted);
     text-decoration: none;
     transition: all .15s;
@@ -425,7 +428,8 @@ a:hover { text-decoration: underline; }
 .chip.active {
     background: rgba(74,158,255,.16);
     border-color: rgba(74,158,255,.4);
-    color: #fff;
+    /* accent, not white — white on the faint blue pill was hard to read */
+    color: var(--accent);
 }
 
 /* Colored active states for horizon and country filter chips */
@@ -437,6 +441,12 @@ a:hover { text-decoration: underline; }
 
 /* Filter bar layout: rows of groups */
 .filter-bar { flex-direction: column; gap: 0.55rem; }
+/* Aktuality variant: Autor+Čas | Horizont+Země side by side, not one stack */
+.filter-bar.filter-cols { flex-direction: row; gap: 1.8rem; align-items: flex-start; }
+.filter-col { display: flex; flex-direction: column; gap: 0.55rem; min-width: 0; }
+@media (max-width: 980px) {
+    .filter-bar.filter-cols { flex-direction: column; gap: 0.55rem; }
+}
 .filter-group {
     display: flex;
     align-items: center;

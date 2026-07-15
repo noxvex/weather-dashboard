@@ -165,11 +165,16 @@
 <div class="card">
     <div class="card-title">
         <span>Předpověď <span class="hint">{{ forecast_rows|length }} dní</span></span>
-        <span>
-            {% for n in forecast_day_options %}
-            <button type="button" class="mode-btn{% if forecast_days == n %} active{% endif %}"
-                    onclick="setForecastDays({{ n }})">{{ n }}</button>
-            {% endfor %}
+        <span style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <button type="button" class="mode-btn{% if forecast_days == 7 %} active{% endif %}"
+                    onclick="setForecastDays(7)">7 dní</button>
+            <span class="custom-box" style="margin:0;">
+                Vlastní:
+                <input type="number" id="pd-custom" min="1" max="16" value="{{ forecast_days }}">
+                dní
+                <button type="button" class="mode-btn{% if forecast_days != 7 %} active{% endif %}"
+                        onclick="setForecastDays(document.getElementById('pd-custom').value)">Zobrazit</button>
+            </span>
         </span>
     </div>
     {% for row in forecast_rows %}

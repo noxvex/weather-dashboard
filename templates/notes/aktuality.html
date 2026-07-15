@@ -45,40 +45,7 @@
         </div>
     </div>
 
-    {# ── Revize surfaced under the graph (existing pattern, not rebuilt) ── #}
-    <div class="graph-revize">
-        {% if revision_summary %}
-            <div class="graph-revize-head">
-                <span class="card-title" style="margin:0;">Revize předpovědi</span>
-                <span class="rev-tiny" style="margin:0;">
-                    {{ revision_summary.previous_batch|date:"j. n." }} → {{ revision_summary.latest_batch|date:"j. n." }}
-                    · {{ revision_summary.total }} změn ≥ 0,5 °C
-                </span>
-            </div>
-            {% if revision_summary.top %}
-                {% for r in revision_summary.top %}
-                <div class="delta-row">
-                    <span><span class="country-chip">{{ r.country }}</span> &nbsp;{{ r.date|date:"j. n." }}</span>
-                    {% if r.delta > 0 %}
-                        <span class="d-chip d-chip-up">+{{ r.delta }} °C</span>
-                    {% else %}
-                        <span class="d-chip d-chip-down">{{ r.delta }} °C</span>
-                    {% endif %}
-                </div>
-                {% endfor %}
-            {% else %}
-                <div class="rev-tiny">Žádné výrazné změny mezi posledními dvěma snímky.</div>
-            {% endif %}
-            <a href="{% url 'notes:revision_tracker' %}" class="rev-tiny" style="display:inline-block; margin-top:8px; color:var(--accent);">Všechny revize →</a>
-        {% else %}
-            <div class="graph-revize-head">
-                <span class="card-title" style="margin:0;">Revize předpovědi</span>
-            </div>
-            <div class="rev-tiny">Revize se zobrazí po alespoň dvou denních snímcích předpovědi.
-                <a href="{% url 'notes:revision_tracker' %}" style="color:var(--accent);">Zobrazit →</a>
-            </div>
-        {% endif %}
-    </div>
+    {# Revize moved to the sidebar column — nothing under the graph anymore #}
 </div>
 
         <div class="eyebrow" style="margin-top:10px;">Aktuality</div>
@@ -99,7 +66,9 @@
             {# strana intentionally omitted — filter change resets to page 1 #}
         </form>
 
-        <div class="filter-bar">
+        {# Two columns: Autor+Čas left, Horizont+Země right — not one tall stack #}
+        <div class="filter-bar filter-cols">
+            <div class="filter-col">
             {# ── Autor ── #}
             <div class="filter-group">
                 <span class="filter-label">Autor</span>
@@ -118,7 +87,9 @@
                 <button type="button" class="chip {% if active_rozsah == '30d' %}active{% endif %}" onclick="setFilter('rozsah','30d')">30 dní</button>
                 <button type="button" class="chip {% if active_rozsah == 'vse' %}active{% endif %}" onclick="setFilter('rozsah','vse')">Vše</button>
             </div>
+            </div>
 
+            <div class="filter-col">
             {# ── Horizont ── #}
             <div class="filter-group">
                 <span class="filter-label">Horizont</span>
@@ -151,6 +122,7 @@
                 <button type="button"
                         class="chip chip-sk {% if active_zeme == 'sk' %}active{% endif %}"
                         onclick="setFilter('zeme','sk')">SR</button>
+            </div>
             </div>
         </div>
 
@@ -203,76 +175,42 @@
         {% endif %}
     </div>
 
-    {# ════ RIGHT — weather sidebar ════ #}
+    {# ════ RIGHT — revision sidebar (weather panel removed by request) ════ #}
     <aside class="ak-sidebar">
 
-        {# Headline CZ/SK numbers — large, do NOT shrink in sizing pass #}
-        {% if forecast_date %}
-        <div class="card headline-card">
-            <div class="card-title">Národní teplota <span class="hint">{{ forecast_date|date:"j. n. Y" }}</span></div>
-            <div class="headline-nums">
-                <div class="headline-nation">
-                    <div class="hl-label">ČESKO</div>
-                    <div class="temp-big">{% if cz_avg.temperature_max is not None %}{{ cz_avg.temperature_max|temp_round }}&thinsp;°{% else %}—{% endif %}</div>
-                    <div class="temp-range">min&thinsp;{% if cz_avg.temperature_min is not None %}{{ cz_avg.temperature_min|temp_round }}&thinsp;°{% else %}—{% endif %}</div>
-                </div>
-                <div class="headline-nation">
-                    <div class="hl-label">SLOVENSKO</div>
-                    <div class="temp-big">{% if sk_avg.temperature_max is not None %}{{ sk_avg.temperature_max|temp_round }}&thinsp;°{% else %}—{% endif %}</div>
-                    <div class="temp-range">min&thinsp;{% if sk_avg.temperature_min is not None %}{{ sk_avg.temperature_min|temp_round }}&thinsp;°{% else %}—{% endif %}</div>
-                </div>
-            </div>
-        </div>
-
-        {# Compact facts-only list of all 22 points — iOS-style fc-row #}
+        {# Full revision list as a long scrollable column (moved from under the graph) #}
         <div class="card">
-            <div class="card-title">Všech 22 bodů <span class="hint">dnes · fakta</span></div>
-
-            {% if cz_points %}
-            <details class="pt-group" open>
-                <summary class="pt-bar pt-cz">Česká republika <span class="pt-count">{{ cz_points|length }} bodů</span></summary>
-                {% for row in cz_points %}
-                    {% with t_min=row.temperature_min|default:0 t_max=row.temperature_max|default:0 %}
-                    <div class="fc-row fc-row--point">
-                        <span class="fc-day">{{ row.point.name }}</span>
-                        <span class="fc-icon">{{ row.weather_code|weather_icon }}</span>
-                        <span class="fc-range">
-                            {{ t_min|temp_round }}°
-                            <span class="fc-track"><span class="fc-fill" style="{% fc_fill_style t_min t_max %}"></span></span>
-                            {{ t_max|temp_round }}°
-                        </span>
-                        <span class="fc-rain">{% if row.precipitation_sum is not None %}{{ row.precipitation_sum }}&thinsp;mm{% else %}—{% endif %}</span>
+            <div class="card-title">
+                Revize předpovědi
+                {% if revision_summary %}
+                <span class="hint">
+                    {{ revision_summary.previous_batch|date:"j. n." }} → {{ revision_summary.latest_batch|date:"j. n." }}
+                    · {{ revision_summary.total }} změn ≥ 0,5 °C
+                </span>
+                {% endif %}
+            </div>
+            {% if revision_summary %}
+                {% if revision_summary.top %}
+                <div style="max-height:68vh; overflow-y:auto;">
+                    {% for r in revision_summary.top %}
+                    <div class="delta-row">
+                        <span><span class="country-chip">{{ r.country }}</span> &nbsp;{{ r.date|date:"j. n." }}</span>
+                        {% if r.delta > 0 %}
+                            <span class="d-chip d-chip-up">+{{ r.delta }} °C</span>
+                        {% else %}
+                            <span class="d-chip d-chip-down">{{ r.delta }} °C</span>
+                        {% endif %}
                     </div>
-                    {% endwith %}
-                {% endfor %}
-            </details>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="rev-tiny">Žádné výrazné změny mezi posledními dvěma snímky.</div>
+                {% endif %}
+            {% else %}
+                <div class="rev-tiny">Revize se zobrazí po alespoň dvou denních snímcích předpovědi.</div>
             {% endif %}
-
-            {% if sk_points %}
-            <details class="pt-group" open>
-                <summary class="pt-bar pt-sk">Slovensko <span class="pt-count">{{ sk_points|length }} bodů</span></summary>
-                {% for row in sk_points %}
-                    {% with t_min=row.temperature_min|default:0 t_max=row.temperature_max|default:0 %}
-                    <div class="fc-row fc-row--point">
-                        <span class="fc-day">{{ row.point.name }}</span>
-                        <span class="fc-icon">{{ row.weather_code|weather_icon }}</span>
-                        <span class="fc-range">
-                            {{ t_min|temp_round }}°
-                            <span class="fc-track"><span class="fc-fill" style="{% fc_fill_style t_min t_max %}"></span></span>
-                            {{ t_max|temp_round }}°
-                        </span>
-                        <span class="fc-rain">{% if row.precipitation_sum is not None %}{{ row.precipitation_sum }}&thinsp;mm{% else %}—{% endif %}</span>
-                    </div>
-                    {% endwith %}
-                {% endfor %}
-            </details>
-            {% endif %}
-
-            {% if not cz_points and not sk_points %}
-                <div class="no-data">Žádná předpovědní data. Spusťte <code>ingest_weather</code>.</div>
-            {% endif %}
+            <a href="{% url 'notes:revision_tracker' %}" class="rev-tiny" style="display:inline-block; margin-top:8px; color:var(--accent);">Všechny revize →</a>
         </div>
-        {% endif %}
 
         {# Since-login delta card #}
         {% if since_login %}

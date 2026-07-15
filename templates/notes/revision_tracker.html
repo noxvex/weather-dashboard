@@ -11,21 +11,49 @@
 
 {# Segmented control styled to match prototype #}
 <div class="rev-seg">
-    <a href="?rozsah=aktualni"
+    <a href="?rozsah=aktualni&zeme={{ zeme }}"
        class="rev-seg-btn {% if bucket == 'aktualni' %}on{% endif %}">
         Aktuální
     </a>
-    <a href="?rozsah=strednedobe"
+    <a href="?rozsah=strednedobe&zeme={{ zeme }}"
        class="rev-seg-btn soon {% if bucket == 'strednedobe' %}on{% endif %}"
        title="Data se sbírají — zobrazení brzy">
         Střednědobá<br><small style="font-size:9px; opacity:.7;">sbírá se</small>
     </a>
-    <a href="?rozsah=dlouhodobe"
+    <a href="?rozsah=dlouhodobe&zeme={{ zeme }}"
        class="rev-seg-btn soon {% if bucket == 'dlouhodobe' %}on{% endif %}"
        title="Data se sbírají — zobrazení brzy">
         Dlouhodobá<br><small style="font-size:9px; opacity:.7;">sbírá se</small>
     </a>
 </div>
+
+{% if not not_enough_data %}
+{# Comparison controls: pick which older snapshot the latest compares against + CZ/SR filter #}
+<div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin:0 0 14px;">
+    <form method="get" style="display:flex; gap:8px; align-items:center; margin:0; flex-wrap:wrap;">
+        <input type="hidden" name="rozsah" value="{{ bucket }}">
+        <input type="hidden" name="zeme" value="{{ zeme }}">
+        <span style="color:var(--muted); font-size:13px;">
+            Aktuální snímek <strong style="color:var(--text);">{{ latest_batch|date:"j. n." }}</strong> porovnat se snímkem:
+        </span>
+        <select name="proti" class="point-select" onchange="this.form.submit()">
+            {% for b in batch_options %}
+            <option value="{{ b|date:'Y-m-d' }}" {% if b|date:'Y-m-d' == previous_batch|date:'Y-m-d' %}selected{% endif %}>
+                {{ b|date:"j. n. Y" }}{% if forloop.first %} · předchozí{% endif %}
+            </option>
+            {% endfor %}
+        </select>
+    </form>
+    <div style="display:flex; gap:6px;">
+        <a class="chip {% if not zeme %}active{% endif %}"
+           href="?rozsah={{ bucket }}&proti={{ previous_batch|date:'Y-m-d' }}">Obě</a>
+        <a class="chip chip-cz {% if zeme == 'cz' %}active{% endif %}"
+           href="?rozsah={{ bucket }}&zeme=cz&proti={{ previous_batch|date:'Y-m-d' }}">ČR</a>
+        <a class="chip chip-sk {% if zeme == 'sk' %}active{% endif %}"
+           href="?rozsah={{ bucket }}&zeme=sk&proti={{ previous_batch|date:'Y-m-d' }}">SR</a>
+    </div>
+</div>
+{% endif %}
 
 {# ── Aktuální bucket ── #}
 {% if bucket == "aktualni" %}
@@ -58,7 +86,7 @@
                 </thead>
                 <tbody>
                     {% if not revisions %}
-                        <tr><td colspan="6" class="no-data-row">Žádné významné změny mezi posledními dvěma snímky.</td></tr>
+                        <tr><td colspan="6" class="no-data-row">Žádné významné změny mezi vybranými snímky.</td></tr>
                     {% else %}
                         {% for r in revisions %}
                             <tr>
@@ -128,7 +156,7 @@
                 </thead>
                 <tbody>
                     {% if not revisions %}
-                        <tr><td colspan="6" class="no-data-row">Žádné významné změny mezi posledními dvěma snímky.</td></tr>
+                        <tr><td colspan="6" class="no-data-row">Žádné významné změny mezi vybranými snímky.</td></tr>
                     {% else %}
                         {% for r in revisions %}
                             <tr>
