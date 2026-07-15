@@ -199,6 +199,18 @@ DONE (verified live on production):
   stats + printable weekly progression (red ▲/teal ▼ deltas with °C AND
   %, per the delta convention) + @media print stylesheet. Tests:
   HistoriePinsRoundTwoTest. Suite: 39 tests green.
+- Pins feedback round 3 (PR #18): Vlastní srovnání works with empty
+  od/do (defaults to whole year 1.1–31.12 — just "počet let" is enough,
+  and roky applies on change); compare fields render CLEAN outside an
+  active comparison (no placeholders, no stale values); 5th range tab
+  "Vlastní"; sessionStorage remembers the last Historie view and
+  restores it on a bare /historie/ visit (↺ Reset button clears it).
+  Subhistorie entries are collapsible <details> with Rozbalit/Sbalit
+  vše (print auto-expands), author shows role (worker/leader/admin,
+  feed color classes), progression togglable Týdny|Dny per pin
+  (shared _progression helper), and step deltas hide % when the base
+  is < 2 °C/mm (near-zero temps gave −1446 %). Tests:
+  HistoriePinsRoundThreeTest. Suite: 45 tests green.
 
 NOT YET DONE / KNOWN BROKEN (going into next session):
 - No Railway cron/worker service yet for `ingest_weather` OR
