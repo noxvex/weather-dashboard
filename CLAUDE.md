@@ -211,6 +211,20 @@ DONE (verified live on production):
   (shared _progression helper), and step deltas hide % when the base
   is < 2 °C/mm (near-zero temps gave −1446 %). Tests:
   HistoriePinsRoundThreeTest. Suite: 45 tests green.
+- Page tweaks round 4 (PR #20): Revize compares the latest snapshot
+  against ANY stored older one (?proti= select, up to 14 back, default
+  previous) + Obě/ČR/SR filter (?zeme=), all three buckets. Historie
+  span tabs (krátkodobá/střednědobá/dlouhodobá) REMOVED — only Celá
+  historie + Vlastní; _historical_span/ROZSAH_DAYS deleted. Bod
+  forecast table: default "7 dní" + Vlastní number input 1–16 (clamped)
+  instead of 3/7/14/16 presets. Aktuality: ČR/SR current-weather
+  sidebar replaced by the FULL revision list as a scrollable column
+  (revision block under the graph removed; _get_revision_summary
+  limit=None), filter bar is two columns (Autor+Čas | Horizont+Země,
+  .filter-cols), and .chip got background:transparent — the <button>
+  default WHITE background was showing through (that was the
+  unreadable white), active state accent instead of white text.
+  Tests: PageTweaksRoundFourTest. Suite: 51 tests green.
 
 NOT YET DONE / KNOWN BROKEN (going into next session):
 - No Railway cron/worker service yet for `ingest_weather` OR
