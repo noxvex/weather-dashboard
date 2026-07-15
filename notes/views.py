@@ -670,11 +670,13 @@ def pin_toggle(request, pk):
     return redirect(pin.historie_url())
 
 
-def _weekly_progression(daily, doy_from, doy_to, roky):
+def _progression(daily, doy_from, doy_to, roky, gran="w"):
     """
-    Per-week means over the pin's doy range across its year window, with
-    week-over-week deltas (°C/mm and %, per the dashboard delta convention).
-    Feeds the printable "postupnost" table on Subhistorie.
+    Per-week (gran="w") or per-day (gran="d") means over the pin's doy range
+    across its year window, with step-over-step deltas (°C/mm and %, per the
+    dashboard delta convention). Feeds the printable "postupnost" tables on
+    Subhistorie. Labels come from the same non-leap reference year parse_dm
+    uses.
     """
     current_year = max((r["year"] for r in daily), default=None)
     if current_year is None:
@@ -685,22 +687,29 @@ def _weekly_progression(daily, doy_from, doy_to, roky):
             continue
         x = int(r["x"])
         if doy_from <= x <= doy_to and r["year"] > current_year - roky:
-            buckets[(x - 1) // 7].append(r["value"])
+            buckets[(x - 1) // 7 if gran == "w" else x].append(r["value"])
 
-    weeks = []
+    steps = []
     prev = None
-    for wk in sorted(buckets):
-        vals = buckets[wk]
+    for key in sorted(buckets):
+        vals = buckets[key]
         avg = sum(vals) / len(vals)
-        # Week label from the non-leap reference year parse_dm uses
-        start = date(2001, 1, 1) + timedelta(days=wk * 7)
-        end = start + timedelta(days=6)
+        if gran == "w":
+            start = date(2001, 1, 1) + timedelta(days=key * 7)
+            end = start + timedelta(days=6)
+            label = f"{start.day}. {start.month}. – {end.day}. {end.month}."
+        else:
+            d = date(2001, 1, 1) + timedelta(days=key - 1)
+            label = f"{d.day}. {d.month}."
         delta = delta_pct = None
         if prev is not None:
             delta = round(avg - prev, 1)
-            delta_pct = round((avg - prev) / abs(prev) * 100) if abs(prev) >= 0.05 else None
-        weeks.append({
-            "label": f"{start.day}. {start.month}. – {end.day}. {end.month}.",
+            # % is meaningless against a near-zero base (−0,1 °C → −1446 %);
+            # only show it when the previous step is at least 2 °C/mm away
+            # from zero
+            delta_pct = round((avg - prev) / abs(prev) * 100) if abs(prev) >= 2.0 else None
+        steps.append({
+            "label": label,
             "avg": round(avg, 1),
             "min": round(min(vals), 1),
             "max": round(max(vals), 1),
@@ -708,7 +717,7 @@ def _weekly_progression(daily, doy_from, doy_to, roky):
             "delta_pct": delta_pct,
         })
         prev = avg
-    return weeks
+    return steps
 
 
 @login_required
@@ -741,7 +750,8 @@ def subhistorie(request):
         entries.append({
             "pin": pin,
             "stats": _stats_from_daily(daily, f, t, pin.roky),
-            "weeks": _weekly_progression(daily, f, t, pin.roky),
+            "weeks": _progression(daily, f, t, pin.roky, gran="w"),
+            "days": _progression(daily, f, t, pin.roky, gran="d"),
             "can_modify": _can_modify(request.user, pin),
         })
     return render(request, "notes/subhistorie.html", {
@@ -1415,10 +1425,16 @@ def historie(request):
         roky = 5
     doy_from = parse_dm(od_raw)
     doy_to = parse_dm(do_raw)
-    if rozsah == "vlastni" and (doy_from is None or doy_to is None):
-        rozsah = "plna"  # incomplete input — fall back to full history
+    if rozsah == "vlastni":
+        # Missing/invalid bounds default to the whole year, so the comparison
+        # works with just "počet let" (or nothing at all) filled in
+        if doy_from is None:
+            od_raw, doy_from = "1.1", 1
+        if doy_to is None:
+            do_raw, doy_to = "31.12", 365
     if doy_from is not None and doy_to is not None and doy_from > doy_to:
         doy_from, doy_to = doy_to, doy_from
+        od_raw, do_raw = do_raw, od_raw
 
     country = None
     point_id = None
