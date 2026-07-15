@@ -10,6 +10,7 @@ from django.db.models.functions import ExtractIsoYear, ExtractWeek, ExtractYear
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
+from django.core.management import call_command
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.http import Http404, HttpResponseBadRequest
@@ -930,7 +931,22 @@ def revision_tracker(request):
         wanted = "ČR" if zeme == "cz" else "SR"
         context["revisions"] = [r for r in context["revisions"] if r["country"] == wanted]
 
+    context["user_can_pin"] = _can_pin(request.user)
     return render(request, "notes/revision_tracker.html", context)
+
+
+@login_required
+def revize_check_now(request):
+    """
+    Leader/admin manual trigger of the daily EC46/SEAS5 revision-note check —
+    same command cron-daily runs, just outside the schedule. Idempotent, so
+    pressing it repeatedly can't duplicate the day's notes.
+    """
+    if not _can_pin(request.user):
+        raise Http404
+    if request.method == "POST":
+        call_command("detect_mlr_changes")
+    return redirect("notes:revision_tracker")
 
 
 def _get_custom_week_data(point, year, week):
