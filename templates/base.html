@@ -26,6 +26,7 @@
         <a href="{% url 'bod' %}" {% if request.resolver_match.url_name == 'bod' %}class="active"{% endif %}>Bod</a>
         <a href="{% url 'historie' %}" {% if request.resolver_match.url_name == 'historie' %}class="active"{% endif %}>Historie</a>
         <a href="{% url 'subhistorie' %}" {% if request.resolver_match.url_name == 'subhistorie' %}class="active"{% endif %}>Subhistorie</a>
+        <a href="{% url 'analyza' %}" {% if request.resolver_match.url_name == 'analyza' %}class="active"{% endif %}>Analýza</a>
         <a href="{% url 'notes:revision_tracker' %}" {% if request.resolver_match.url_name == 'revision_tracker' %}class="active"{% endif %}>Revize</a>
     </div>
 

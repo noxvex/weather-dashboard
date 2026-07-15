@@ -16,7 +16,8 @@ from django.db.models import Q
 from django.http import Http404, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 
-from ingest.models import DailyForecast, HistoricalActual, MediumLongRangeForecast, WeatherPoint
+from ingest.forecast_archive import ensure_archive
+from ingest.models import ArchivedForecast, DailyForecast, HistoricalActual, MediumLongRangeForecast, WeatherPoint
 from .forms import HistoriePinForm, NoteForm, PinEditForm
 from .models import HistoriePin, Note
 from .utils import parse_dm
@@ -1597,4 +1598,202 @@ def historie(request):
              "author": p["author"], "od": p["od"], "do": p["do"]}
             for p in pins
         ],
+    })
+
+
+# ── Analýza předpovědí ──────────────────────────────────────────────────────
+
+def _analyza_window(rezim, target, dni):
+    """Analysed valid-date window: single day, ISO week, or last-N-days
+    period ending where ERA5 actuals still exist (~6-day lag)."""
+    if rezim == "tyden":
+        ws = target - timedelta(days=target.weekday())
+        return ws, ws + timedelta(days=6)
+    if rezim == "obdobi":
+        we = date.today() - timedelta(days=6)
+        return we - timedelta(days=dni - 1), we
+    return target, target
+
+
+def _analyza_sources(point, ws, we):
+    """
+    All forecast values we have for the window, keyed by (valid_date, lead):
+    archived Open-Meteo rows, our own short-range snapshots, and our own
+    EC46/SEAS5 snapshots (kept separate — they carry a daily MEAN, not
+    max/min, so they compare against the ERA5 midpoint instead).
+    """
+    arch = {
+        (a.valid_date, a.lead_days): a
+        for a in ArchivedForecast.objects.filter(
+            point=point, valid_date__gte=ws, valid_date__lte=we)
+    }
+    short = {}
+    for r in DailyForecast.objects.filter(
+            point=point, horizon=DailyForecast.HORIZON_SHORT,
+            forecast_date__gte=ws, forecast_date__lte=we, issued_at__isnull=False):
+        lead = (r.forecast_date - r.issued_at.date()).days
+        if lead >= 0:
+            short.setdefault((r.forecast_date, lead), r)
+    mlr = {}
+    for r in MediumLongRangeForecast.objects.filter(
+            point=point, target_date__gte=ws, target_date__lte=we):
+        lead = (r.target_date - r.issued_at.date()).days
+        if lead >= 0:
+            mlr.setdefault((r.target_date, lead), r)
+    return arch, short, mlr
+
+
+def _fc_value(metric, arch_row, short_row):
+    """Forecast value for one (day, lead): archived ECMWF wins (consistent
+    model), our own snapshot fills leads the archive doesn't have."""
+    if arch_row is not None:
+        v = arch_row.temp_max if metric == "t" else arch_row.precip_mm
+        if v is not None:
+            return v, "archiv"
+    if short_row is not None:
+        v = short_row.temperature_max if metric == "t" else short_row.precipitation_sum
+        if v is not None:
+            return v, "snímek"
+    return None, None
+
+
+def _mean(vals):
+    return sum(vals) / len(vals) if vals else None
+
+
+@login_required
+def analyza(request):
+    points = list(WeatherPoint.objects.order_by("country", "name"))
+    if not points:
+        return render(request, "notes/analyza.html", {"points": []})
+
+    sel_raw = request.GET.get("bod", "")
+    point = next((p for p in points if str(p.pk) == sel_raw), points[0])
+
+    metric = request.GET.get("m", "t")
+    if metric not in ("t", "p"):
+        metric = "t"
+    rezim = request.GET.get("rezim", "den")
+    if rezim not in ("den", "tyden", "obdobi"):
+        rezim = "den"
+    try:
+        dni = int(request.GET.get("dni", "30"))
+    except ValueError:
+        dni = 30
+    dni = 30 if dni not in (30, 90) else dni
+
+    today = date.today()
+    try:
+        target = date.fromisoformat(request.GET.get("datum", ""))
+    except ValueError:
+        # Default: a week back — has the full 1–7 lead archive AND an actual
+        target = today - timedelta(days=7)
+
+    ws, we = _analyza_window(rezim, target, dni)
+
+    # Fetch what's missing from Open-Meteo (cached forever in DB). The
+    # single-runs archive costs one call per model run, so the long "období"
+    # window sticks to the cheap previous-runs archive (leads 1–7).
+    api_calls, exhausted = ensure_archive(
+        point, ws, we, max_calls=4 if rezim == "obdobi" else 24,
+    )
+
+    arch, short, mlr = _analyza_sources(point, ws, we)
+    actuals = {
+        h.date: h for h in HistoricalActual.objects.filter(
+            point=point, date__gte=ws, date__lte=we)
+    }
+
+    def act_value(d):
+        h = actuals.get(d)
+        if h is None:
+            return None
+        return h.temp_max if metric == "t" else h.precip_mm
+
+    def act_mid(d):
+        h = actuals.get(d)
+        if h is None or h.temp_min is None or h.temp_max is None:
+            return None
+        return (h.temp_min + h.temp_max) / 2
+
+    days = [ws + timedelta(days=i) for i in range((we - ws).days + 1)]
+    leads = sorted({l for (_, l) in list(arch) + list(short)})
+
+    rows = []
+    for lead in leads:
+        vals, errs, srcs = [], [], set()
+        for d in days:
+            v, src = _fc_value(metric, arch.get((d, lead)), short.get((d, lead)))
+            if v is None:
+                continue
+            vals.append(v)
+            srcs.add(src)
+            a = act_value(d)
+            if a is not None:
+                errs.append(v - a)
+        if not vals:
+            continue
+        rows.append({
+            "lead": lead,
+            "value": round(_mean(vals), 1),
+            "err": round(_mean(errs), 1) if errs else None,
+            "mae": round(_mean([abs(e) for e in errs]), 1) if errs else None,
+            "max_err": round(max(abs(e) for e in errs), 1) if errs else None,
+            "pct_bad": round(100 * len([e for e in errs if abs(e) > 2]) / len(errs)) if errs else None,
+            "n": len(errs),
+            "src": " + ".join(sorted(srcs)),
+        })
+
+    # EC46/SEAS5 rows: daily MEAN, so temp compares against the ERA5 midpoint
+    mlr_rows = []
+    for lead in sorted({l for (_, l) in mlr}):
+        vals, errs = [], []
+        for d in days:
+            r = mlr.get((d, lead))
+            if r is None:
+                continue
+            v = r.temp_mean if metric == "t" else r.precip_probability
+            if v is None:
+                continue
+            vals.append(v)
+            a = act_mid(d) if metric == "t" else act_value(d)
+            if a is not None:
+                errs.append(v - a)
+        if not vals:
+            continue
+        mlr_rows.append({
+            "lead": lead,
+            "value": round(_mean(vals), 1),
+            "err": round(_mean(errs), 1) if errs else None,
+        })
+
+    actual_avg = _mean([act_value(d) for d in days if act_value(d) is not None])
+
+    chart = {
+        "mode": rezim,
+        "metric": metric,
+        "leads": [r["lead"] for r in rows],
+        "values": [r["value"] for r in rows],
+        "maes": [r["mae"] for r in rows],
+        "mlr_leads": [r["lead"] for r in mlr_rows],
+        "mlr_values": [r["value"] for r in mlr_rows],
+        "actual": round(actual_avg, 1) if actual_avg is not None else None,
+    }
+
+    return render(request, "notes/analyza.html", {
+        "points": points,
+        "sel": str(point.pk),
+        "point": point,
+        "metric": metric,
+        "rezim": rezim,
+        "dni": dni,
+        "datum": target.isoformat(),
+        "ws": ws, "we": we,
+        "rows": rows,
+        "mlr_rows": mlr_rows,
+        "actual_avg": chart["actual"],
+        "chart_json": chart,
+        "api_calls": api_calls,
+        "exhausted": exhausted,
+        "has_data": bool(rows or mlr_rows),
     })
