@@ -27,6 +27,17 @@
     </a>
 </div>
 
+{% if user_can_pin %}
+{# Leader/admin: run the daily EC46/SEAS5 revision-note check outside the cron schedule #}
+<form method="post" action="{% url 'notes:revize_check' %}" style="margin:0 0 14px;">
+    {% csrf_token %}
+    <button type="submit" class="mode-btn">🔄 Zkontrolovat revize teď</button>
+    <span style="color:var(--muted); font-size:12px; margin-left:8px;">
+        Vytvoří Aktuality poznámky pro střednědobé/dlouhodobé revize ≥ 1,0 °C (jinak běží 1× denně)
+    </span>
+</form>
+{% endif %}
+
 {% if not not_enough_data %}
 {# Comparison controls: pick which older snapshot the latest compares against + CZ/SR filter #}
 <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin:0 0 14px;">

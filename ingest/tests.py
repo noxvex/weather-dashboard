@@ -3,11 +3,19 @@ Minimal regression suite for the cron wrapper commands — confirms that one
 sub-step raising doesn't stop the rest from running, since that's the whole
 point of wrapping each call_command() in its own try/except.
 """
+from datetime import date, timedelta
 from io import StringIO
 from unittest.mock import patch
 
+from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import TestCase
+from django.utils import timezone
+
+from ingest.models import MediumLongRangeForecast, WeatherPoint
+from notes.models import Note
+
+User = get_user_model()
 
 
 class RunFrequentIngestTest(TestCase):
@@ -49,9 +57,10 @@ class RunDailyIngestTest(TestCase):
         called_steps = [c.args[0] for c in mock_call_command.call_args_list]
         self.assertEqual(
             called_steps,
-            ["fetch_seasonal", "fetch_ec46", "fetch_pollen", "fetch_era5_backfill", "prune_notes"],
+            ["fetch_seasonal", "fetch_ec46", "detect_mlr_changes",
+             "fetch_pollen", "fetch_era5_backfill", "prune_notes"],
         )
-        self.assertIn("4/5 steps succeeded", out.getvalue())
+        self.assertIn("5/6 steps succeeded", out.getvalue())
 
     @patch("ingest.management.commands.run_daily_ingest.call_command")
     def test_era5_backfill_called_with_rolling_start(self, mock_call_command):
@@ -59,3 +68,90 @@ class RunDailyIngestTest(TestCase):
         era5_call = next(c for c in mock_call_command.call_args_list if c.args[0] == "fetch_era5_backfill")
         self.assertIn("start", era5_call.kwargs)
         self.assertNotIn("end", era5_call.kwargs)
+
+
+class DetectMlrChangesTest(TestCase):
+    """
+    EC46/SEAS5 revisions ≥1.0 °C must land in the Aktuality feed as
+    system_change notes with the right horizon label, once per day at most
+    (idempotent), reusing the same _mlr_revision_context the Revize page uses.
+    """
+
+    def setUp(self):
+        User.objects.create_superuser(username="root", password="x", email="root@example.com")
+        self.point = WeatherPoint.objects.create(
+            name="Testov", region="Test", country="CZ", latitude=50.0, longitude=15.0,
+        )
+        self.today = date.today()
+
+    def _snapshot(self, horizon, days_ago, temp):
+        """One MLR snapshot: two future target dates at the given temp_mean."""
+        issued = timezone.now() - timedelta(days=days_ago)
+        for offset in (1, 2):
+            MediumLongRangeForecast.objects.create(
+                point=self.point, target_date=self.today + timedelta(days=offset),
+                horizon=horizon, issued_at=issued,
+                temp_mean=temp, precip_probability=10.0,
+            )
+
+    def _run(self):
+        out = StringIO()
+        call_command("detect_mlr_changes", stdout=out)
+        return out.getvalue()
+
+    def test_ec46_revision_creates_mid_note_with_facts(self):
+        self._snapshot(MediumLongRangeForecast.HORIZON_EC46, 1, 15.0)
+        self._snapshot(MediumLongRangeForecast.HORIZON_EC46, 0, 16.5)  # +1.5 °C
+        self._run()
+        note = Note.objects.get()
+        self.assertEqual(note.note_type, Note.TYPE_SYSTEM_CHANGE)
+        self.assertEqual(note.horizon, Note.HORIZON_MID)
+        self.assertEqual(note.country, Note.COUNTRY_CZ)
+        self.assertIn("(EC46)", note.body)
+        self.assertIn("střednědobé", note.body)
+        self.assertIn("1.5 °C", note.body)
+        self.assertIn("vyšší", note.body)
+        self.assertIn("15.0 → 16.5 °C", note.body)
+
+    def test_seas5_revision_creates_long_note(self):
+        self._snapshot(MediumLongRangeForecast.HORIZON_SEAS5, 1, 15.0)
+        self._snapshot(MediumLongRangeForecast.HORIZON_SEAS5, 0, 13.5)  # −1.5 °C
+        self._run()
+        note = Note.objects.get()
+        self.assertEqual(note.horizon, Note.HORIZON_LONG)
+        self.assertIn("(SEAS5)", note.body)
+        self.assertIn("dlouhodobé", note.body)
+        self.assertIn("nižší", note.body)
+
+    def test_below_threshold_creates_nothing(self):
+        self._snapshot(MediumLongRangeForecast.HORIZON_EC46, 1, 15.0)
+        self._snapshot(MediumLongRangeForecast.HORIZON_EC46, 0, 15.9)  # 0.9 < 1.0
+        self._run()
+        self.assertEqual(Note.objects.count(), 0)
+
+    def test_single_snapshot_skips_without_note(self):
+        self._snapshot(MediumLongRangeForecast.HORIZON_EC46, 0, 15.0)
+        out = self._run()
+        self.assertEqual(Note.objects.count(), 0)
+        self.assertIn("fewer than 2 snapshots", out)
+
+    def test_repeated_run_is_idempotent(self):
+        self._snapshot(MediumLongRangeForecast.HORIZON_EC46, 1, 15.0)
+        self._snapshot(MediumLongRangeForecast.HORIZON_EC46, 0, 16.5)
+        self._run()
+        self._run()
+        self.assertEqual(Note.objects.count(), 1)
+
+    def test_not_blocked_by_short_range_mid_note_same_day(self):
+        # detect_changes can also write a horizon=mid note for the same
+        # country+day — the (EC46) body marker must keep dedup separate
+        root = User.objects.get(username="root")
+        Note.objects.create(
+            author=root, note_type=Note.TYPE_SYSTEM_CHANGE,
+            country=Note.COUNTRY_CZ, horizon=Note.HORIZON_MID,
+            body="⚠️ Česká republika: Předpověď ukazuje teplotní výkyv 6 °C…",
+        )
+        self._snapshot(MediumLongRangeForecast.HORIZON_EC46, 1, 15.0)
+        self._snapshot(MediumLongRangeForecast.HORIZON_EC46, 0, 16.5)
+        self._run()
+        self.assertEqual(Note.objects.filter(body__contains="(EC46)").count(), 1)

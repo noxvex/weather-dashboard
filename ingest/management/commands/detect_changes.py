@@ -38,7 +38,13 @@ def _national_avg(rows, field):
 
 
 def _note_exists_today(country_tag, event_tag):
-    """Returns True if we already wrote this type of note today (deduplication)."""
+    """
+    Returns True if we already wrote this type of note today (deduplication).
+    country_tag must be the full label that appears in the body ("Česká
+    republika"/"Slovensko") — the "CZ"/"SK" codes were passed here for a
+    while and never matched, so the dedup silently did nothing and a second
+    12h run could duplicate the day's notes.
+    """
     today = date.today()
     return Note.objects.filter(
         Q(note_type=Note.TYPE_SYSTEM_CHANGE) &
@@ -146,8 +152,7 @@ class Command(BaseCommand):
             for i in range(len(temps) - 6):
                 window = temps[i:i + 7]
                 if (max(window) - min(window)) >= SWING_THRESHOLD:
-                    tag = f"teplotní výkyv_{country}"
-                    if not _note_exists_today(country, f"teplotní výkyv"):
+                    if not _note_exists_today(country_label, "teplotní výkyv"):
                         _create_note(author, country=country.lower(), horizon=_horizon_for(series[i][0]), body=
                            f"⚠️ {country_label}: Předpověď ukazuje teplotní výkyv "
                             f"{round(max(window) - min(window), 1)} °C v průběhu 7 dnů "
@@ -165,7 +170,7 @@ class Command(BaseCommand):
                     if streak == 1:
                         streak_start = fd
                     if streak >= HEATWAVE_DAYS:
-                        if not _note_exists_today(country, "tropické dny"):
+                        if not _note_exists_today(country_label, "tropické dny"):
                             _create_note(author, country=country.lower(), horizon=_horizon_for(streak_start), body=
                                f"🌡 {country_label}: Předpovídány tropické dny (≥{HEATWAVE_TEMP:.0f} °C) "
                                 f"od {streak_start.strftime('%-d. %-m.')} — "
@@ -184,7 +189,7 @@ class Command(BaseCommand):
                 if prev_wet != curr_wet:
                     fd = series[i][0]
                     direction = "sucho → déšť" if curr_wet else "déšť → sucho"
-                    if not _note_exists_today(country, "přechod srážek"):
+                    if not _note_exists_today(country_label, "přechod srážek"):
                         _create_note(author, country=country.lower(), horizon=_horizon_for(fd), body=
                            f"🌧 {country_label}: Předpověď naznačuje přechod srážek "
                             f"({direction}) kolem {fd.strftime('%-d. %-m.')}."
@@ -202,7 +207,7 @@ class Command(BaseCommand):
                         delta = abs(curr_t - prev_t)
                         if delta >= REVISION_THRESHOLD:
                             direction = "vyšší" if curr_t > prev_t else "nižší"
-                            if not _note_exists_today(country, "revize předpovědi"):
+                            if not _note_exists_today(country_label, "revize předpovědi"):
                                 _create_note(author, country=country.lower(), horizon=_horizon_for(fd), body=
                                    f"🔄 {country_label}: Revize předpovědi pro "
                                     f"{fd.strftime('%-d. %-m.')} — teplota o {delta:.1f} °C {direction} "
