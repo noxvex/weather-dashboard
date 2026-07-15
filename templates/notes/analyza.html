@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+
+{% block title %}Analýza předpovědí — Weather Dashboard{% endblock %}
+
+{% block extra_head %}
+{# No defer: Plotly must be loaded before the inline draw script runs #}
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+.an-table { border-collapse: collapse; font-size: 13px; width: 100%; max-width: 640px; }
+.an-table th {
+    color: var(--muted); font-weight: 500; text-align: left;
+    padding: 5px 14px 5px 0; border-bottom: 1px solid var(--border);
+}
+.an-table td { padding: 5px 14px 5px 0; border-bottom: 1px solid var(--border); color: var(--text); }
+.an-table tr:last-child td { border-bottom: none; }
+.an-controls input[type=date] {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 10px; font: inherit; font-size: 13px;
+    color-scheme: dark;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="eyebrow">Analýza předpovědí</div>
+<p class="page-sub">
+    Jak se předpověď pro daný termín měnila s předstihem a jak přesná nakonec byla ·
+    {{ point.name }} ({{ point.country }})
+</p>
+
+{% if not points %}
+<div class="coming-soon"><span class="cs-icon">📍</span><h3>Žádné body</h3></div>
+{% else %}
+
+{# ── Controls ── #}
+<form method="get" class="an-controls" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px;">
+    <select name="bod" class="point-select" onchange="this.form.submit()">
+        {% for p in points %}
+        <option value="{{ p.pk }}" {% if sel == p.pk|stringformat:"s" %}selected{% endif %}>{{ p.name }} ({{ p.country }})</option>
+        {% endfor %}
+    </select>
+    <select name="m" class="point-select" onchange="this.form.submit()">
+        <option value="t" {% if metric == "t" %}selected{% endif %}>Teplota (max)</option>
+        <option value="p" {% if metric == "p" %}selected{% endif %}>Srážky</option>
+    </select>
+    <select name="rezim" class="point-select" onchange="this.form.submit()">
+        <option value="den" {% if rezim == "den" %}selected{% endif %}>Jeden den</option>
+        <option value="tyden" {% if rezim == "tyden" %}selected{% endif %}>Týden</option>
+        <option value="obdobi" {% if rezim == "obdobi" %}selected{% endif %}>Období — přesnost podle předstihu</option>
+    </select>
+    {% if rezim == "obdobi" %}
+    <select name="dni" class="point-select" onchange="this.form.submit()">
+        <option value="30" {% if dni == 30 %}selected{% endif %}>posledních 30 dní</option>
+        <option value="90" {% if dni == 90 %}selected{% endif %}>posledních 90 dní</option>
+    </select>
+    {% else %}
+    <input type="date" name="datum" value="{{ datum }}" onchange="this.form.submit()">
+    {% endif %}
+    <button type="submit" class="mode-btn">Analyzovat</button>
+</form>
+
+{% if exhausted %}
+<div style="color:var(--muted); font-size:12.5px; margin:0 0 10px;">
+    ⏳ Archiv se stahuje po částech (limit API na jeden dotaz) — načtená část je zobrazena, zbytek se doplní při dalším obnovení stránky.
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-title">
+        {% if rezim == "obdobi" %}
+            Průměrná chyba předpovědi podle předstihu · {{ ws|date:"j. n." }} – {{ we|date:"j. n. Y" }}
+        {% elif rezim == "tyden" %}
+            Vývoj předpovědi pro týden {{ ws|date:"j. n." }} – {{ we|date:"j. n. Y" }} podle předstihu
+        {% else %}
+            Vývoj předpovědi pro {{ ws|date:"j. n. Y" }} podle předstihu
+        {% endif %}
+        {% if actual_avg is not None %}
+        <span class="hint">realita (ERA5): {{ actual_avg }} {% if metric == "p" %}mm{% else %}°C{% endif %}</span>
+        {% endif %}
+    </div>
+    {% if has_data %}
+    <div id="an-chart" style="width:100%; height:420px;"></div>
+    {% else %}
+    <div class="coming-soon">
+        <span class="cs-icon">🔭</span>
+        <h3>Pro tento výběr zatím nejsou data</h3>
+        <p>Archiv Open-Meteo pokrývá předstihy 1–15 dní od jara 2024; delší předstihy se plní z našich denních snímků od 7/2026.</p>
+    </div>
+    {% endif %}
+</div>
+
+{% if rows %}
+<div class="card" style="margin-top:14px;">
+    <div class="card-title">
+        {% if rezim == "obdobi" %}Přesnost podle předstihu (proti ERA5 realitě){% else %}Hodnoty podle předstihu{% endif %}
+    </div>
+    <table class="an-table">
+        <tr>
+            <th>Předstih</th>
+            {% if rezim == "obdobi" %}
+            <th>Průměrná chyba (MAE)</th>
+            <th>Max chyba</th>
+            <th>% dní mimo o &gt;2&thinsp;{% if metric == "p" %}mm{% else %}°C{% endif %}</th>
+            <th>Dní</th>
+            {% else %}
+            <th>Předpověď</th>
+            <th>Odchylka od reality</th>
+            {% endif %}
+            <th>Zdroj</th>
+        </tr>
+        {% for r in rows %}
+        <tr>
+            <td>{% if r.lead == 0 %}v den{% else %}{{ r.lead }} d předem{% endif %}</td>
+            {% if rezim == "obdobi" %}
+            <td>{% if r.mae is not None %}{{ r.mae }} {% if metric == "p" %}mm{% else %}°C{% endif %}{% else %}—{% endif %}</td>
+            <td>{% if r.max_err is not None %}{{ r.max_err }} {% if metric == "p" %}mm{% else %}°C{% endif %}{% else %}—{% endif %}</td>
+            <td>{% if r.pct_bad is not None %}{{ r.pct_bad }} %{% else %}—{% endif %}</td>
+            <td>{{ r.n }}</td>
+            {% else %}
+            <td>{{ r.value }} {% if metric == "p" %}mm{% else %}°C{% endif %}</td>
+            <td>
+                {% if r.err is None %}
+                    <span style="color:var(--muted);">realita zatím není</span>
+                {% elif r.err > 0 %}
+                    <span class="delta-pos">▲ +{{ r.err }} {% if metric == "p" %}mm{% else %}°C{% endif %}</span>
+                {% elif r.err < 0 %}
+                    <span class="delta-neg">▼ {{ r.err }} {% if metric == "p" %}mm{% else %}°C{% endif %}</span>
+                {% else %}
+                    <span class="delta-zero">přesně</span>
+                {% endif %}
+            </td>
+            {% endif %}
+            <td style="color:var(--muted); font-size:12px;">{{ r.src }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+{% endif %}
+
+{% if mlr_rows %}
+<div class="card" style="margin-top:14px;">
+    <div class="card-title">EC46 / SEAS5 snímky <span class="hint">denní průměr — {% if metric == "t" %}srovnáváno se středem ERA5 min–max{% else %}surový odhad mm{% endif %}</span></div>
+    <table class="an-table">
+        <tr><th>Předstih</th><th>Předpověď (průměr)</th><th>Odchylka</th></tr>
+        {% for r in mlr_rows %}
+        <tr>
+            <td>{{ r.lead }} d předem</td>
+            <td>{{ r.value }} {% if metric == "p" %}mm{% else %}°C{% endif %}</td>
+            <td>
+                {% if r.err is None %}<span style="color:var(--muted);">—</span>
+                {% elif r.err > 0 %}<span class="delta-pos">▲ +{{ r.err }}</span>
+                {% elif r.err < 0 %}<span class="delta-neg">▼ {{ r.err }}</span>
+                {% else %}<span class="delta-zero">0</span>{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+{% endif %}
+
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if has_data %}
+{{ chart_json|json_script:"an-chart-data" }}
+<script>
+(function () {
+    const raw = JSON.parse(document.getElementById('an-chart-data').textContent);
+    const unit = raw.metric === 'p' ? ' mm' : ' °C';
+    const layout = {
+        paper_bgcolor: 'transparent', plot_bgcolor: 'transparent',
+        font: { color: '#8A97AD', family: 'Inter, sans-serif', size: 11 },
+        margin: { t: 10, r: 14, b: 42, l: 46 },
+        xaxis: {
+            title: { text: 'dní předem (předstih)', font: { size: 11 } },
+            gridcolor: 'rgba(36,48,68,0.6)', tickcolor: 'transparent',
+            autorange: 'reversed',
+        },
+        yaxis: {
+            gridcolor: 'rgba(36,48,68,0.5)', tickcolor: 'transparent',
+            ticksuffix: unit,
+        },
+        legend: { font: { size: 11, color: '#8A97AD' }, bgcolor: 'transparent', orientation: 'h', x: 0, y: 1.12 },
+        hovermode: 'x unified',
+        hoverlabel: { bgcolor: '#131C2E', bordercolor: '#243044', font: { color: '#E8EDF5', size: 12 } },
+    };
+    const config = { displayModeBar: false, responsive: true };
+    const traces = [];
+
+    if (raw.mode === 'obdobi') {
+        traces.push({
+            x: raw.leads, y: raw.maes, type: 'bar', name: 'Průměrná chyba',
+            marker: { color: '#4A9EFF' },
+            hovertemplate: 'MAE %{y:.1f}' + unit + '<extra>%{x} d předem</extra>',
+        });
+        layout.yaxis.title = { text: 'průměrná absolutní chyba', font: { size: 11 } };
+    } else {
+        traces.push({
+            x: raw.leads, y: raw.values, type: 'scatter', mode: 'lines+markers',
+            name: 'Předpověď', line: { color: '#4A9EFF', width: 2.2 },
+            hovertemplate: '%{y:.1f}' + unit + '<extra>%{x} d předem</extra>',
+        });
+        if (raw.mlr_leads.length) {
+            traces.push({
+                x: raw.mlr_leads, y: raw.mlr_values, type: 'scatter', mode: 'lines+markers',
+                name: 'EC46/SEAS5 (průměr)', line: { color: '#FBBF24', width: 1.6, dash: 'dot' },
+                hovertemplate: '%{y:.1f}' + unit + '<extra>%{x} d předem · průměr</extra>',
+            });
+        }
+        if (raw.actual !== null) {
+            const xs = raw.leads.concat(raw.mlr_leads);
+            const xmin = Math.min(...xs), xmax = Math.max(...xs);
+            traces.push({
+                x: [xmin, xmax], y: [raw.actual, raw.actual],
+                type: 'scatter', mode: 'lines', name: 'Realita (ERA5)',
+                line: { color: '#F87171', width: 1.8, dash: 'dash' },
+                hovertemplate: '%{y:.1f}' + unit + '<extra>realita</extra>',
+            });
+        }
+    }
+    Plotly.newPlot('an-chart', traces, layout, config);
+}());
+</script>
+{% endif %}
+{% endblock %}

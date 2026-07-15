@@ -4,6 +4,7 @@ a fix that was previously silently broken by an unrelated change elsewhere,
 so the same class of bug gets caught automatically instead of by hand.
 """
 import re
+from unittest.mock import patch
 from datetime import date, timedelta
 from io import StringIO
 
@@ -757,3 +758,81 @@ class PageTweaksRoundFourTest(TestCase):
         # limit=None — the sidebar gets every delta, not a top-5 cut
         self.assertEqual(len(summary["top"]), summary["total"])
         self.assertGreater(summary["total"], 5)
+
+
+class AnalyzaViewTest(TestCase):
+    """
+    The Analýza page merges archived Open-Meteo forecasts, our own snapshots
+    and ERA5 actuals into per-lead rows — including the headline use case:
+    "N days ago the forecast said X, reality was Y".
+    """
+
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(username="analyzer", password="x")
+        self.client.force_login(self.user)
+        self.point = WeatherPoint.objects.create(
+            name="Testov", region="Test", country="CZ", latitude=50.0, longitude=15.0,
+        )
+        self.day = date.today() - timedelta(days=7)
+        from ingest.models import ArchivedForecast
+        # Archived: 3 days ahead the forecast said 20 °C
+        ArchivedForecast.objects.create(
+            point=self.point, valid_date=self.day, lead_days=3,
+            temp_max=20.0, temp_min=10.0, precip_mm=0.0,
+            source=ArchivedForecast.SOURCE_PREVIOUS_RUNS,
+        )
+        # Own short-range snapshot: 5 days ahead it said 14 °C
+        DailyForecast.objects.create(
+            point=self.point, forecast_date=self.day,
+            horizon=DailyForecast.HORIZON_SHORT,
+            issued_at=timezone.now() - timedelta(days=12),
+            temperature_min=8.0, temperature_max=14.0, precipitation_sum=1.0,
+        )
+        # EC46 snapshot: 30 days ahead, mean 16 °C
+        MediumLongRangeForecast.objects.create(
+            point=self.point, target_date=self.day,
+            horizon=MediumLongRangeForecast.HORIZON_EC46,
+            issued_at=timezone.now() - timedelta(days=37),
+            temp_mean=16.0, precip_probability=5.0,
+        )
+        # Reality: max 24 °C (midpoint 19)
+        HistoricalActual.objects.create(
+            point=self.point, date=self.day, temp_min=14.0, temp_max=24.0, precip_mm=0.0,
+        )
+
+    @patch("notes.views.ensure_archive", return_value=(0, False))
+    def test_day_mode_merges_sources_and_errors(self, _mock):
+        resp = self.client.get(f"/analyza/?bod={self.point.pk}&rezim=den&datum={self.day.isoformat()}&m=t")
+        rows = {r["lead"]: r for r in resp.context["rows"]}
+        # archive lead 3: said 20, reality 24 → err −4.0
+        self.assertEqual(rows[3]["value"], 20.0)
+        self.assertEqual(rows[3]["err"], -4.0)
+        self.assertEqual(rows[3]["src"], "archiv")
+        # own snapshot issued 12 days before today = 5 days before the
+        # target date: said 14 → err −10.0
+        self.assertEqual(rows[5]["value"], 14.0)
+        self.assertEqual(rows[5]["err"], -10.0)
+        self.assertEqual(rows[5]["src"], "snímek")
+        # EC46 issued 37 days before today = lead 30; mean 16 vs midpoint 19
+        mlr = {r["lead"]: r for r in resp.context["mlr_rows"]}
+        self.assertEqual(mlr[30]["value"], 16.0)
+        self.assertEqual(mlr[30]["err"], -3.0)
+        self.assertEqual(resp.context["actual_avg"], 24.0)
+
+    @patch("notes.views.ensure_archive", return_value=(0, False))
+    def test_obdobi_mode_aggregates_mae(self, _mock):
+        resp = self.client.get(f"/analyza/?bod={self.point.pk}&rezim=obdobi&dni=30&m=t")
+        rows = {r["lead"]: r for r in resp.context["rows"]}
+        self.assertEqual(rows[3]["mae"], 4.0)
+        self.assertEqual(rows[3]["max_err"], 4.0)
+        self.assertEqual(rows[3]["pct_bad"], 100)
+        self.assertEqual(rows[3]["n"], 1)
+
+    @patch("notes.views.ensure_archive", return_value=(0, False))
+    def test_page_renders_with_chart(self, _mock):
+        resp = self.client.get(f"/analyza/?bod={self.point.pk}&rezim=den&datum={self.day.isoformat()}")
+        html = resp.content.decode()
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("an-chart-data", html)
+        self.assertIn("Vývoj předpovědi", html)

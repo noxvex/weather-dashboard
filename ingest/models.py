@@ -115,3 +115,43 @@ class PollenRecord(models.Model):
 
     def __str__(self):
         return f"{self.point.name} pollen {self.date}"
+
+
+class ArchivedForecast(models.Model):
+    """
+    Forecast-as-issued for a valid date, keyed by lead_days (how many days
+    before valid_date the forecast was made). Fetched on demand from
+    Open-Meteo's archives — previous-runs API for leads 1–7 (back to
+    ~2022/2024), single-runs API (ECMWF IFS) for leads 8–15 (runs archived
+    since 2024-03) — and cached here permanently, so a repeated analysis of
+    the same day/window costs zero API calls. Feeds the Analýza předpovědí
+    page together with our own DailyForecast/MediumLongRangeForecast
+    snapshots (longer leads, accumulating since 7/2026) and ERA5 actuals.
+    """
+    SOURCE_PREVIOUS_RUNS = "prev"
+    SOURCE_SINGLE_RUNS = "single"
+    SOURCE_CHOICES = [
+        (SOURCE_PREVIOUS_RUNS, "Previous runs (1–7 dní)"),
+        (SOURCE_SINGLE_RUNS, "Single runs (8–15 dní)"),
+    ]
+
+    point = models.ForeignKey(WeatherPoint, on_delete=models.CASCADE, related_name="archived_forecasts")
+    valid_date = models.DateField()                       # the day the forecast was FOR
+    lead_days = models.PositiveSmallIntegerField()        # issued this many days before valid_date
+    temp_max = models.FloatField(null=True, blank=True)
+    temp_min = models.FloatField(null=True, blank=True)
+    precip_mm = models.FloatField(null=True, blank=True)
+    source = models.CharField(max_length=6, choices=SOURCE_CHOICES)
+    fetched_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["point", "valid_date", "lead_days"], name="uniq_archived_forecast"),
+        ]
+        indexes = [
+            models.Index(fields=["point", "valid_date"]),
+        ]
+        ordering = ["valid_date", "lead_days"]
+
+    def __str__(self):
+        return f"{self.point.name} {self.valid_date} −{self.lead_days}d"
