@@ -4,8 +4,18 @@
 
 {% block extra_head %}
 <style>
-.sub-entry { margin-bottom: 16px; }
-.sub-params { color: var(--muted); font-size: 13px; margin: 2px 0 8px; }
+details.sub-entry { margin-bottom: 12px; }
+details.sub-entry > summary {
+    cursor: pointer; list-style: none;
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+}
+details.sub-entry > summary::-webkit-details-marker { display: none; }
+details.sub-entry > summary::before {
+    content: '▸'; color: var(--muted); font-size: 12px;
+    transition: transform .15s; display: inline-block;
+}
+details.sub-entry[open] > summary::before { transform: rotate(90deg); }
+.sub-params { color: var(--muted); font-size: 13px; margin: 10px 0 8px; }
 .sub-table { border-collapse: collapse; font-size: 13px; width: 100%; max-width: 560px; }
 .sub-table th {
     color: var(--muted); font-weight: 500; text-align: left;
@@ -13,6 +23,7 @@
 }
 .sub-table td { padding: 5px 14px 5px 0; border-bottom: 1px solid var(--border); color: var(--text); }
 .sub-table tr:last-child td { border-bottom: none; }
+.sub-days { max-height: 420px; overflow-y: auto; }
 .sub-stats { display: flex; gap: 22px; flex-wrap: wrap; margin: 8px 0 10px; font-size: 13px; }
 .sub-stats b { color: var(--text); font-weight: 600; }
 .sub-stats span { color: var(--muted); }
@@ -20,12 +31,13 @@
 @media print {
     nav, .no-print { display: none !important; }
     body { background: #fff !important; color: #000 !important; }
-    .card, .sub-entry, .eyebrow, .page-sub, .card-title,
+    .card, .sub-entry, .eyebrow, .page-sub, .card-title, summary,
     .sub-table td, .sub-table th, .sub-params, .sub-stats b, .sub-stats span {
         background: #fff !important; color: #000 !important;
         border-color: #bbb !important; box-shadow: none !important;
     }
     .card { break-inside: avoid; }
+    .sub-days { max-height: none !important; overflow: visible !important; }
     .delta-pos, .delta-neg { color: #000 !important; }
 }
 </style>
@@ -34,9 +46,11 @@
 {% block content %}
 
 <div class="eyebrow">Subhistorie</div>
-<p class="page-sub" style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
-    Všechny piny se souhrnnými daty a týdenní postupností — bez grafu, k tisku
-    <button type="button" class="mode-btn no-print" onclick="window.print()">🖨 Vytisknout</button>
+<p class="page-sub" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+    Všechny piny se souhrnnými daty a postupností po týdnech i dnech — bez grafu, k tisku
+    <button type="button" class="mode-btn no-print" onclick="subExpandAll(true)">Rozbalit vše</button>
+    <button type="button" class="mode-btn no-print" onclick="subExpandAll(false)">Sbalit vše</button>
+    <button type="button" class="mode-btn no-print" onclick="subPrint()">🖨 Vytisknout</button>
 </p>
 
 {% if not entries %}
@@ -50,18 +64,22 @@
 {% endif %}
 
 {% for e in entries %}
-<div class="card sub-entry">
-    <div class="card-title" style="display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;">
-        📌 {{ e.pin.selection_label }}
-        <span style="color:var(--muted); font-weight:400; font-size:13px;">
+<details class="card sub-entry">
+    <summary>
+        <span class="card-title" style="margin:0;">📌 {{ e.pin.selection_label }}</span>
+        <span style="color:var(--muted); font-size:13px;">
             {{ e.pin.od }} – {{ e.pin.do }} · posledních {{ e.pin.roky }} let ·
             {% if e.pin.metric == "p" %}srážky{% else %}teplota{% endif %}
         </span>
+        <span class="note-author {% if e.pin.author.role == 'admin' %}is-admin{% elif e.pin.author.role == 'leader' %}is-leader{% endif %}" style="font-size:12.5px;">
+            {{ e.pin.author.username }} · {{ e.pin.author.get_role_display|lower }}
+        </span>
         {% if e.pin.is_pinned %}<span style="color:var(--accent);" title="Připnuto — nevyprší">∞</span>{% endif %}
         <a href="{{ e.pin.historie_url }}" class="no-print" style="margin-left:auto; color:var(--accent); font-size:12.5px; font-weight:400;">Otevřít v grafu →</a>
-    </div>
+    </summary>
+
     <div class="sub-params">
-        {{ e.pin.author.username }} · {{ e.pin.created_at|date:"j. n. Y, H:i" }} — {{ e.pin.body }}
+        {{ e.pin.created_at|date:"j. n. Y, H:i" }} — {{ e.pin.body }}
     </div>
 
     {% if e.stats %}
@@ -81,38 +99,39 @@
     {% endif %}
 
     {% if e.weeks %}
-    <table class="sub-table">
-        <tr>
-            <th>Týden</th>
-            <th>Průměr</th>
-            <th>Změna proti předchozímu týdnu</th>
-            <th>Min</th>
-            <th>Max</th>
-        </tr>
-        {% for w in e.weeks %}
-        <tr>
-            <td>{{ w.label }}</td>
-            <td>{{ w.avg }} {% if e.pin.metric == "p" %}mm{% else %}°C{% endif %}</td>
-            <td>
-                {% if forloop.first %}
-                    <span style="color:var(--muted);">—</span>
-                {% elif w.delta > 0 %}
-                    <span class="delta-pos">▲ +{{ w.delta }} {% if e.pin.metric == "p" %}mm{% else %}°C{% endif %}{% if w.delta_pct is not None %} · +{{ w.delta_pct }} %{% endif %}</span>
-                {% elif w.delta < 0 %}
-                    <span class="delta-neg">▼ {{ w.delta }} {% if e.pin.metric == "p" %}mm{% else %}°C{% endif %}{% if w.delta_pct is not None %} · {{ w.delta_pct }} %{% endif %}</span>
-                {% else %}
-                    <span class="delta-zero">0</span>
-                {% endif %}
-            </td>
-            <td>{{ w.min }} {% if e.pin.metric == "p" %}mm{% else %}°C{% endif %}</td>
-            <td>{{ w.max }} {% if e.pin.metric == "p" %}mm{% else %}°C{% endif %}</td>
-        </tr>
-        {% endfor %}
-    </table>
+    <div class="no-print" style="display:flex; gap:6px; margin:0 0 10px;">
+        <button type="button" class="mode-btn active" onclick="subGran(this, {{ e.pin.pk }}, 'w')">Týdny</button>
+        <button type="button" class="mode-btn" onclick="subGran(this, {{ e.pin.pk }}, 'd')">Dny</button>
+    </div>
+    <div id="sub-w-{{ e.pin.pk }}">
+        {% include "notes/_progression_table.html" with rows=e.weeks metric=e.pin.metric col_label="Týden" delta_label="týdnu" %}
+    </div>
+    <div id="sub-d-{{ e.pin.pk }}" class="sub-days" hidden>
+        {% include "notes/_progression_table.html" with rows=e.days metric=e.pin.metric col_label="Den" delta_label="dni" %}
+    </div>
     {% else %}
     <div style="color:var(--muted); font-size:13px;">Pro rozsah pinu nejsou historická data.</div>
     {% endif %}
-</div>
+</details>
 {% endfor %}
 
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function subExpandAll(open) {
+    document.querySelectorAll('details.sub-entry').forEach(d => { d.open = open; });
+}
+function subPrint() {
+    subExpandAll(true);  // collapsed details would print empty
+    window.print();
+}
+function subGran(btn, id, g) {
+    document.getElementById('sub-w-' + id).hidden = (g !== 'w');
+    document.getElementById('sub-d-' + id).hidden = (g !== 'd');
+    btn.parentElement.querySelectorAll('.mode-btn').forEach(b => {
+        b.classList.toggle('active', b === btn);
+    });
+}
+</script>
 {% endblock %}

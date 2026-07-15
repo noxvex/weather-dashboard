@@ -616,3 +616,66 @@ class HistoriePinsRoundTwoTest(TestCase):
         self.assertIn("Změna proti předchozímu týdnu", html)
         # Rising temps → at least one red ▲ delta rendered
         self.assertIn("delta-pos", html)
+
+
+class HistoriePinsRoundThreeTest(TestCase):
+    """
+    Round three of live feedback: comparison works with missing od/do
+    (defaults to the whole year, so "just set počet let" works), reversed
+    bounds swap including the displayed labels, Subhistorie entries are
+    collapsible with a daily progression and show the author's role.
+    """
+
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(username="round3", password="x")
+        self.client.force_login(self.user)
+        self.point = WeatherPoint.objects.create(
+            name="Testov", region="Test", country="CZ", latitude=50.0, longitude=15.0,
+        )
+        today = date.today()
+        for year in (today.year - 1, today.year):
+            for day in range(1, 22):
+                HistoricalActual.objects.create(
+                    point=self.point, date=date(year, 6, day),
+                    temp_min=10.0, temp_max=20.0, precip_mm=1.0,
+                )
+
+    def test_vlastni_without_bounds_defaults_to_full_year(self):
+        resp = self.client.get("/historie/?rozsah=vlastni&roky=3&bod=cz&m=t")
+        self.assertEqual(resp.context["rozsah"], "vlastni")
+        self.assertEqual(resp.context["od"], "1.1")
+        self.assertEqual(resp.context["do"], "31.12")
+        self.assertEqual(resp.context["chart_json"]["xrange"], [1, 365])
+
+    def test_vlastni_with_only_od_defaults_do(self):
+        resp = self.client.get("/historie/?rozsah=vlastni&od=15.6&roky=3&bod=cz&m=t")
+        self.assertEqual(resp.context["od"], "15.6")
+        self.assertEqual(resp.context["do"], "31.12")
+
+    def test_reversed_bounds_swap_displayed_labels_too(self):
+        resp = self.client.get("/historie/?rozsah=vlastni&od=21.6&do=1.6&roky=3&bod=cz&m=t")
+        self.assertEqual(resp.context["od"], "1.6")
+        self.assertEqual(resp.context["do"], "21.6")
+
+    def test_compare_fields_clean_outside_vlastni(self):
+        html = self.client.get("/historie/?rozsah=plna&bod=cz&m=t&od=1.6&do=21.6&roky=5").content.decode()
+        # visible compare-box fields render empty (no stale values, no placeholder)
+        self.assertIn('od <input type="text" name="od" value="">', html)
+        self.assertNotIn("placeholder=", html.split("compare-box")[1].split("</form>")[0])
+
+    def test_reset_button_present(self):
+        html = self.client.get("/historie/").content.decode()
+        self.assertIn("↺ Reset", html)
+
+    def test_subhistorie_collapsible_daily_and_role(self):
+        leader = User.objects.create_user(username="lead", password="x", role="leader")
+        HistoriePin.objects.create(
+            author=leader, body="denní pin", sel="cz",
+            od="1.6", do="21.6", roky=5, metric="t",
+        )
+        html = self.client.get(reverse("subhistorie")).content.decode()
+        self.assertIn("<details", html)
+        self.assertIn("Změna proti předchozímu dni", html)
+        self.assertIn("is-leader", html)
+        self.assertIn("lead · leader", html)

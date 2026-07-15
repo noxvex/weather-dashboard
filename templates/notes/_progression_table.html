@@ -1,0 +1,34 @@
+{% comment %}
+Progression table for one Subhistorie pin. Context: rows (from
+_progression), metric ("t"/"p"), col_label ("Týden"/"Den"), delta_label
+("týdnu"/"dni"). Deltas follow the dashboard convention: warmer/up = red ▲,
+cooler/down = teal ▼, °C/mm and % together.
+{% endcomment %}
+<table class="sub-table">
+    <tr>
+        <th>{{ col_label }}</th>
+        <th>Průměr</th>
+        <th>Změna proti předchozímu {{ delta_label }}</th>
+        <th>Min</th>
+        <th>Max</th>
+    </tr>
+    {% for w in rows %}
+    <tr>
+        <td>{{ w.label }}</td>
+        <td>{{ w.avg }} {% if metric == "p" %}mm{% else %}°C{% endif %}</td>
+        <td>
+            {% if forloop.first %}
+                <span style="color:var(--muted);">—</span>
+            {% elif w.delta > 0 %}
+                <span class="delta-pos">▲ +{{ w.delta }} {% if metric == "p" %}mm{% else %}°C{% endif %}{% if w.delta_pct is not None %} · +{{ w.delta_pct }} %{% endif %}</span>
+            {% elif w.delta < 0 %}
+                <span class="delta-neg">▼ {{ w.delta }} {% if metric == "p" %}mm{% else %}°C{% endif %}{% if w.delta_pct is not None %} · {{ w.delta_pct }} %{% endif %}</span>
+            {% else %}
+                <span class="delta-zero">0</span>
+            {% endif %}
+        </td>
+        <td>{{ w.min }} {% if metric == "p" %}mm{% else %}°C{% endif %}</td>
+        <td>{{ w.max }} {% if metric == "p" %}mm{% else %}°C{% endif %}</td>
+    </tr>
+    {% endfor %}
+</table>

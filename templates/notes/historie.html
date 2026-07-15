@@ -3,6 +3,21 @@
 {% block title %}Historie — Weather Dashboard{% endblock %}
 
 {% block extra_head %}
+<script>
+// Foolproofing: remember the last Historie view for this tab, and restore it
+// when arriving without params (e.g. via the nav tab). The Reset button
+// clears the stored state before navigating, so it never fights this.
+(function () {
+    try {
+        if (window.location.search.length > 1) {
+            sessionStorage.setItem('histState', window.location.search);
+        } else {
+            const saved = sessionStorage.getItem('histState');
+            if (saved) window.location.replace(window.location.pathname + saved);
+        }
+    } catch (e) { /* private mode etc. — just skip */ }
+}());
+</script>
 {# No defer: Plotly must be loaded before the inline draw script runs #}
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <style>
@@ -54,6 +69,8 @@
        href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah=dlouha{{ keep }}&roky={{ roky }}">Dlouhodobá<small>7 měsíců</small></a>
     <a class="seg-link seg-full {% if rozsah == 'plna' %}on{% endif %}"
        href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah=plna{{ keep }}&roky={{ roky }}">Celá historie<small>od 2015 · překryv let</small></a>
+    <a class="seg-link seg-full {% if rozsah == 'vlastni' %}on{% endif %}"
+       href="?bod={{ sel }}&m={{ metric }}&g={{ gran }}&rozsah=vlastni{{ keep }}&roky={{ roky }}">Vlastní<small>srovnání od–do</small></a>
 </div>
 {% endwith %}
 
@@ -83,6 +100,8 @@
         <option value="d" {% if gran == "d" %}selected{% endif %}>Denní</option>
     </select>
     {% endif %}
+    <button type="button" class="mode-btn" title="Zpět na výchozí zobrazení"
+            onclick="try { sessionStorage.removeItem('histState'); } catch (e) {} window.location = '{% url 'historie' %}';">↺ Reset</button>
 </form>
 
 {# ── Manual comparison: pick a date range and how many years back ── #}
@@ -91,9 +110,11 @@
     <input type="hidden" name="m" value="{{ metric }}">
     <input type="hidden" name="rozsah" value="vlastni">
     <strong style="color:var(--text);">Vlastní srovnání:</strong>
-    od <input type="text" name="od" placeholder="12.7" value="{{ od }}">
-    do <input type="text" name="do" placeholder="15.11" value="{{ do }}">
-    · počet let <input type="number" name="roky" min="2" max="12" value="{{ roky }}">
+    {# Fields show values only while a comparison is active — otherwise clean; #}
+    {# empty od/do simply means the whole year, so Porovnat always works #}
+    od <input type="text" name="od" value="{% if rozsah == 'vlastni' %}{{ od }}{% endif %}">
+    do <input type="text" name="do" value="{% if rozsah == 'vlastni' %}{{ do }}{% endif %}">
+    · počet let <input type="number" name="roky" min="2" max="12" value="{{ roky }}" onchange="histSubmit(this.form)">
     <button type="submit" class="mode-btn">Porovnat</button>
     {% if rozsah == "vlastni" and has_data %}
     <button type="button" class="mode-btn" onclick="document.getElementById('pin-dialog').showModal()">📌 Přidat pin</button>
