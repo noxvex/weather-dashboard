@@ -236,10 +236,11 @@ def _get_seasonal_chart_data():
 
 def _get_revision_summary(all_rows, batch_dates, limit=5):
     """
-    Compact revision summary for the main page: the two most recent short-range
-    snapshots compared (same target_date, different issued_at) with the largest
-    national temp deltas. Derived entirely from pre-fetched rows — zero extra
-    queries. Returns None if batch_dates has fewer than 2 entries.
+    Revision summary for the main page: the two most recent short-range
+    snapshots compared (same target_date, different issued_at), largest
+    national temp deltas first. limit=None returns the full list (feeds the
+    scrollable sidebar column). Derived entirely from pre-fetched rows — zero
+    extra queries. Returns None if batch_dates has fewer than 2 entries.
     """
     if len(batch_dates) < 2:
         return None
@@ -273,7 +274,7 @@ def _get_revision_summary(all_rows, batch_dates, limit=5):
         "latest_batch": latest,
         "previous_batch": previous,
         "total": len(deltas),
-        "top": deltas[:limit],
+        "top": deltas if limit is None else deltas[:limit],
     }
 
 
@@ -384,7 +385,6 @@ def aktuality(request):
     latest_date = batch_dates[0] if batch_dates else None
     latest_rows = [r for r in all_rows if r.issued_at and r.issued_at.date() == latest_date] if latest_date else []
 
-    forecast_date, cz_avg, sk_avg, cz_points, sk_points = _get_weather_panel(latest_rows)
     since_login = _get_since_login(request.user.last_login)
     filter_chips = _build_filter_chips(notes_qs)
     # Pass the raw dict — the json_script template filter handles serialization.
@@ -392,7 +392,8 @@ def aktuality(request):
     # string instead of an object and the chart silently renders nothing.
     chart_json = _get_chart_data(latest_rows)
     mid_json, long_json = _get_seasonal_chart_data()
-    revision_summary = _get_revision_summary(all_rows, batch_dates)
+    # Full list, not top-5 — the sidebar renders it as a long scrollable column
+    revision_summary = _get_revision_summary(all_rows, batch_dates, limit=None)
 
     has_historical = cache.get(_HISTORICAL_EXISTS_KEY)
     if has_historical is None:
@@ -408,11 +409,6 @@ def aktuality(request):
         "notes": notes,
         "user_can_pin": _can_pin(request.user),
         "form": NoteForm(),
-        "forecast_date": forecast_date,
-        "cz_avg": cz_avg,
-        "sk_avg": sk_avg,
-        "cz_points": cz_points,
-        "sk_points": sk_points,
         "since_login": since_login,
         "filter_chips": filter_chips,
         "active_filter": autor,
@@ -762,17 +758,19 @@ def subhistorie(request):
 
 # ── Revision tracker ────────────────────────────────────────────────────────
 
-def _mlr_revision_context(horizon, threshold):
+def _mlr_revision_context(horizon, threshold, proti_raw=""):
     """
     Same shape as the aktuální branch below, but for a MediumLongRangeForecast
-    horizon (EC46/SEAS5): compares the 2 most recent issued_at snapshots per
-    (country, target_date) using temp_mean directly (no max/min to split).
-    precip_prob_delta is a delta of the RAW mm sum stored in the
-    precip_probability field, not a real probability — Open-Meteo's seasonal
-    API has no true precip-probability variable; see the comment in
+    horizon (EC46/SEAS5): compares the latest issued_at snapshot against the
+    previous one by default, or against an older stored snapshot picked via
+    ?proti=YYYY-MM-DD (up to 14 snapshots back). Uses temp_mean directly (no
+    max/min to split). precip_prob_delta is a delta of the RAW mm sum stored
+    in the precip_probability field, not a real probability — Open-Meteo's
+    seasonal API has no true precip-probability variable; see the comment in
     fetch_seasonal.py (and fetch_ec46.py) for why that field holds mm.
     Returns a dict to merge into the view context — either {"revisions",
-    "latest_batch", "previous_batch"} or {"revisions": [], "not_enough_data": True}.
+    "latest_batch", "previous_batch", "batch_options"} or
+    {"revisions": [], "not_enough_data": True}.
     """
     today = date.today()
 
@@ -787,6 +785,10 @@ def _mlr_revision_context(horizon, threshold):
         return {"revisions": [], "not_enough_data": True}
 
     latest, previous = batch_dates[0], batch_dates[1]
+    for bd in batch_dates[1:]:
+        if bd.date().isoformat() == proti_raw:
+            previous = bd
+            break
 
     def get_nat_series(batch_dt, country):
         rows = list(
@@ -827,7 +829,10 @@ def _mlr_revision_context(horizon, threshold):
                     "precip_prob_delta": precip_prob_delta,
                 })
 
-    return {"revisions": revisions, "latest_batch": latest, "previous_batch": previous}
+    return {
+        "revisions": revisions, "latest_batch": latest, "previous_batch": previous,
+        "batch_options": batch_dates[1:],
+    }
 
 
 @login_required
@@ -835,7 +840,13 @@ def revision_tracker(request):
     bucket = request.GET.get("rozsah", "aktualni")
     if bucket not in ("aktualni", "strednedobe", "dlouhodobe"):
         bucket = "aktualni"
-    context = {"bucket": bucket}
+    zeme = request.GET.get("zeme", "")
+    if zeme not in ("cz", "sk"):
+        zeme = ""
+    # Which older snapshot to compare the latest against — defaults to the
+    # immediately previous one ("co se teď stalo")
+    proti_raw = request.GET.get("proti", "")
+    context = {"bucket": bucket, "zeme": zeme}
 
     if bucket == "aktualni":
         today = date.today()
@@ -852,6 +863,10 @@ def revision_tracker(request):
         if len(batch_dates) >= 2:
             latest = batch_dates[0]
             previous = batch_dates[1]
+            for bd in batch_dates[1:]:
+                if bd.isoformat() == proti_raw:
+                    previous = bd
+                    break
 
             def get_nat_series(batch_date, country):
                 rows = list(
@@ -895,15 +910,25 @@ def revision_tracker(request):
             context["revisions"] = revisions
             context["latest_batch"] = latest
             context["previous_batch"] = previous
+            context["batch_options"] = batch_dates[1:]
         else:
             context["revisions"] = []
             context["not_enough_data"] = True
 
     elif bucket == "strednedobe":
-        context.update(_mlr_revision_context(MediumLongRangeForecast.HORIZON_EC46, threshold=1.0))
+        context.update(_mlr_revision_context(
+            MediumLongRangeForecast.HORIZON_EC46, threshold=1.0, proti_raw=proti_raw,
+        ))
 
     elif bucket == "dlouhodobe":
-        context.update(_mlr_revision_context(MediumLongRangeForecast.HORIZON_SEAS5, threshold=1.0))
+        context.update(_mlr_revision_context(
+            MediumLongRangeForecast.HORIZON_SEAS5, threshold=1.0, proti_raw=proti_raw,
+        ))
+
+    # Country filter applies to whichever bucket produced the rows
+    if zeme and context.get("revisions"):
+        wanted = "ČR" if zeme == "cz" else "SR"
+        context["revisions"] = [r for r in context["revisions"] if r["country"] == wanted]
 
     return render(request, "notes/revision_tracker.html", context)
 
@@ -998,14 +1023,12 @@ def point_detail(request):
     r_horizont = request.GET.get("r_horizont", "")
     r_zeme = request.GET.get("r_zeme", "")
 
-    # ── Forecast table day count (?pd=) — restricted to the offered options ──
-    FORECAST_DAY_OPTIONS = [3, 7, 14, 16]
+    # ── Forecast table day count (?pd=) — default 7, custom 1–16 ──
     try:
         forecast_days = int(request.GET.get("pd", 7))
     except (ValueError, TypeError):
         forecast_days = 7
-    if forecast_days not in FORECAST_DAY_OPTIONS:
-        forecast_days = 7
+    forecast_days = max(1, min(16, forecast_days))
 
     def _filter_reports(base_qs):
         qs = _apply_time_filter(base_qs, r_rozsah)
@@ -1059,7 +1082,7 @@ def point_detail(request):
             "custom_active": False, "custom_chart": {"kind": None},
             "custom_year": None, "custom_week": None,
             "min_custom_year": min_custom_year, "max_custom_year": max_custom_year,
-            "forecast_days": forecast_days, "forecast_day_options": FORECAST_DAY_OPTIONS,
+            "forecast_days": forecast_days,
         })
 
     # ── City selection via ?bod=<id>, default to first point ──
@@ -1200,7 +1223,6 @@ def point_detail(request):
         "min_custom_year": min_custom_year,
         "max_custom_year": max_custom_year,
         "forecast_days": forecast_days,
-        "forecast_day_options": FORECAST_DAY_OPTIONS,
     })
 
 
@@ -1251,27 +1273,6 @@ def _historical_series(country=None, point_id=None, granularity="w", metric="t")
         .annotate(value=value)
         .order_by("year", "x")
     )
-
-
-def _historical_span(country=None, point_id=None, days=16, metric="t"):
-    """
-    Recent ERA5 actuals as a simple date series over the last `days` days
-    (national average across points, or a single point). Feeds the
-    krátkodobá/střednědobá/dlouhodobá spans on the Historie page.
-    """
-    since = date.today() - timedelta(days=days)
-    qs = HistoricalActual.objects.filter(date__gte=since)
-    if point_id is not None:
-        qs = qs.filter(point_id=point_id)
-    elif country is not None:
-        qs = qs.filter(point__country=country)
-
-    value = Avg("precip_mm") if metric == "p" else Avg((F("temp_min") + F("temp_max")) / 2.0)
-    rows = qs.values("date").annotate(value=value).order_by("date")
-    return {
-        "dates": [r["date"].isoformat() for r in rows if r["value"] is not None],
-        "values": [round(r["value"], 1) for r in rows if r["value"] is not None],
-    }
 
 
 _MLR_FORECAST_CACHE_KEY = "historie_mlr_forecast_rows"
@@ -1394,9 +1395,6 @@ def _forecast_overlay_series(country=None, point_id=None, granularity="w", metri
     return series
 
 
-ROZSAH_DAYS = {"kratka": 16, "stredni": 120, "dlouha": 214}
-
-
 @login_required
 def historie(request):
     points = list(WeatherPoint.objects.order_by("country", "name"))
@@ -1409,7 +1407,7 @@ def historie(request):
     if metric not in ("t", "p"):
         metric = "t"
     rozsah = request.GET.get("rozsah", "plna")
-    if rozsah not in ("kratka", "stredni", "dlouha", "plna", "vlastni"):
+    if rozsah not in ("plna", "vlastni"):
         rozsah = "plna"
     rezim = request.GET.get("rezim", "abs")
     if rezim not in ("abs", "pct"):
@@ -1449,120 +1447,110 @@ def historie(request):
         else:
             point_id, selection_label = point.pk, f"{point.name} ({point.country})"
 
-    pins = []
-    if rozsah in ("kratka", "stredni", "dlouha"):
-        # Recent-actuals span: simple date series, no overlay
-        span = _historical_span(
-            country=country, point_id=point_id,
-            days=ROZSAH_DAYS[rozsah], metric=metric,
+    # Overlay: full history, or manual comparison (daily, custom doy range,
+    # last `roky` years, all traces visible)
+    if rozsah == "vlastni":
+        gran = "d"
+        rezim = "abs"
+    rows = _historical_series(country=country, point_id=point_id, granularity=gran, metric=metric)
+
+    # "Current year" must be determined from the full unfiltered series,
+    # not from the doy-filtered by_year below — a custom range that reaches
+    # into the future (e.g. today..end of year) has no rows yet for the
+    # current year in that slice, which would otherwise make max(by_year)
+    # silently resolve to last year and shift the whole "last N years"
+    # window off by one.
+    current_year = max((r["year"] for r in rows), default=None)
+
+    by_year = {}
+    for r in rows:
+        if r["value"] is None:
+            continue
+        x = int(r["x"])
+        if rozsah == "vlastni" and not (doy_from <= x <= doy_to):
+            continue
+        by_year.setdefault(r["year"], {"x": [], "values": []})
+        by_year[r["year"]]["x"].append(x)
+        by_year[r["year"]]["values"].append(round(r["value"], 1))
+
+    if rozsah == "vlastni" and current_year is not None:
+        by_year = {y: s for y, s in by_year.items() if y > current_year - roky}
+
+    # Similarity % of each year vs the current year over overlapping x:
+    # 100 % = identical, each °C (or mm) of mean abs difference costs 12.5 pts.
+    # current_year may have no rows in this doy slice (e.g. range reaches
+    # into the future) — cur_map stays empty and similarity is skipped.
+    cur_map = dict(zip(by_year[current_year]["x"], by_year[current_year]["values"])) if current_year in by_year else {}
+    for year, s in by_year.items():
+        if year == current_year or not cur_map:
+            s["sim"] = None
+            continue
+        diffs = [abs(v - cur_map[x]) for x, v in zip(s["x"], s["values"]) if x in cur_map]
+        s["sim"] = max(0, round(100 - (sum(diffs) / len(diffs)) * 12.5)) if diffs else None
+
+    # Percentage mode: deviation from the all-years average per x,
+    # normalized by the seasonal amplitude so values stay sane around 0 °C.
+    if rezim == "pct" and by_year:
+        clim = defaultdict(list)
+        for s in by_year.values():
+            for x, v in zip(s["x"], s["values"]):
+                clim[x].append(v)
+        clim_avg = {x: sum(vs) / len(vs) for x, vs in clim.items()}
+        amplitude = (max(clim_avg.values()) - min(clim_avg.values())) or 1.0
+        for s in by_year.values():
+            s["values"] = [
+                round((v - clim_avg[x]) / amplitude * 100, 1)
+                for x, v in zip(s["x"], s["values"])
+            ]
+
+    # Dashed forecast continuation of the current year — abs mode only
+    # (pct deviations need a climatology row per x, which future dates
+    # don't have). Skipped when the current year has no real rows in the
+    # selected slice: there'd be no trace to visually continue from.
+    if rezim == "abs" and current_year in by_year:
+        fc = _forecast_overlay_series(
+            country=country, point_id=point_id, granularity=gran, metric=metric,
+            doy_from=doy_from if rozsah == "vlastni" else None,
+            doy_to=doy_to if rozsah == "vlastni" else None,
         )
-        chart = {"mode": "span", "rozsah": rozsah, "metric": metric, **span}
-        has_data = bool(span["dates"])
-    else:
-        # Overlay: full history, or manual comparison (daily, custom doy range,
-        # last `roky` years, all traces visible)
-        if rozsah == "vlastni":
-            gran = "d"
-            rezim = "abs"
-        rows = _historical_series(country=country, point_id=point_id, granularity=gran, metric=metric)
+        cur = by_year[current_year]
+        real_x = set(cur["x"])
+        fc = [p for p in fc if p["x"] not in real_x]
+        if fc:
+            # Prepend the last real point so the dashed segment connects
+            # to the real trace with no visual gap.
+            cur["forecast_x"] = [cur["x"][-1]] + [p["x"] for p in fc]
+            cur["forecast_values"] = [cur["values"][-1]] + [p["value"] for p in fc]
 
-        # "Current year" must be determined from the full unfiltered series,
-        # not from the doy-filtered by_year below — a custom range that reaches
-        # into the future (e.g. today..end of year) has no rows yet for the
-        # current year in that slice, which would otherwise make max(by_year)
-        # silently resolve to last year and shift the whole "last N years"
-        # window off by one.
-        current_year = max((r["year"] for r in rows), default=None)
-
-        by_year = {}
-        for r in rows:
-            if r["value"] is None:
-                continue
-            x = int(r["x"])
-            if rozsah == "vlastni" and not (doy_from <= x <= doy_to):
-                continue
-            by_year.setdefault(r["year"], {"x": [], "values": []})
-            by_year[r["year"]]["x"].append(x)
-            by_year[r["year"]]["values"].append(round(r["value"], 1))
-
-        if rozsah == "vlastni" and current_year is not None:
-            by_year = {y: s for y, s in by_year.items() if y > current_year - roky}
-
-        # Similarity % of each year vs the current year over overlapping x:
-        # 100 % = identical, each °C (or mm) of mean abs difference costs 12.5 pts.
-        # current_year may have no rows in this doy slice (e.g. range reaches
-        # into the future) — cur_map stays empty and similarity is skipped.
-        cur_map = dict(zip(by_year[current_year]["x"], by_year[current_year]["values"])) if current_year in by_year else {}
-        for year, s in by_year.items():
-            if year == current_year or not cur_map:
-                s["sim"] = None
-                continue
-            diffs = [abs(v - cur_map[x]) for x, v in zip(s["x"], s["values"]) if x in cur_map]
-            s["sim"] = max(0, round(100 - (sum(diffs) / len(diffs)) * 12.5)) if diffs else None
-
-        # Percentage mode: deviation from the all-years average per x,
-        # normalized by the seasonal amplitude so values stay sane around 0 °C.
-        if rezim == "pct" and by_year:
-            clim = defaultdict(list)
-            for s in by_year.values():
-                for x, v in zip(s["x"], s["values"]):
-                    clim[x].append(v)
-            clim_avg = {x: sum(vs) / len(vs) for x, vs in clim.items()}
-            amplitude = (max(clim_avg.values()) - min(clim_avg.values())) or 1.0
-            for s in by_year.values():
-                s["values"] = [
-                    round((v - clim_avg[x]) / amplitude * 100, 1)
-                    for x, v in zip(s["x"], s["values"])
-                ]
-
-        # Dashed forecast continuation of the current year — abs mode only
-        # (pct deviations need a climatology row per x, which future dates
-        # don't have). Skipped when the current year has no real rows in the
-        # selected slice: there'd be no trace to visually continue from.
-        if rezim == "abs" and current_year in by_year:
-            fc = _forecast_overlay_series(
-                country=country, point_id=point_id, granularity=gran, metric=metric,
-                doy_from=doy_from if rozsah == "vlastni" else None,
-                doy_to=doy_to if rozsah == "vlastni" else None,
-            )
-            cur = by_year[current_year]
-            real_x = set(cur["x"])
-            fc = [p for p in fc if p["x"] not in real_x]
-            if fc:
-                # Prepend the last real point so the dashed segment connects
-                # to the real trace with no visual gap.
-                cur["forecast_x"] = [cur["x"][-1]] + [p["x"] for p in fc]
-                cur["forecast_values"] = [cur["values"][-1]] + [p["value"] for p in fc]
-
-        def _year_entry(y, s):
-            entry = {
-                "year": y,
-                "x": s["x"],
-                "values": s["values"],
-                "name": f"{y} · {s['sim']} %" if s.get("sim") is not None else str(y),
-            }
-            if "forecast_x" in s:
-                entry["forecast_x"] = s["forecast_x"]
-                entry["forecast_values"] = s["forecast_values"]
-            return entry
-
-        chart = {
-            "mode": "overlay",
-            "granularity": gran,
-            "metric": metric,
-            "rezim": rezim,
-            "years": [_year_entry(y, s) for y, s in sorted(by_year.items())],
+    def _year_entry(y, s):
+        entry = {
+            "year": y,
+            "x": s["x"],
+            "values": s["values"],
+            "name": f"{y} · {s['sim']} %" if s.get("sim") is not None else str(y),
         }
-        if rozsah == "vlastni":
-            chart["all_visible"] = True
-            chart["xrange"] = [doy_from, doy_to]
-        has_data = bool(by_year)
+        if "forecast_x" in s:
+            entry["forecast_x"] = s["forecast_x"]
+            entry["forecast_values"] = s["forecast_values"]
+        return entry
 
-        # Pins live in doy space, so they only render in overlay modes
-        pins = _pins_context(
-            request.user, sel=sel, metric=metric, gran=gran,
-            country=country, point_id=point_id, rows=rows,
-        )
+    chart = {
+        "mode": "overlay",
+        "granularity": gran,
+        "metric": metric,
+        "rezim": rezim,
+        "years": [_year_entry(y, s) for y, s in sorted(by_year.items())],
+    }
+    if rozsah == "vlastni":
+        chart["all_visible"] = True
+        chart["xrange"] = [doy_from, doy_to]
+    has_data = bool(by_year)
+
+    # Pins live in doy space, so they only render in overlay modes
+    pins = _pins_context(
+        request.user, sel=sel, metric=metric, gran=gran,
+        country=country, point_id=point_id, rows=rows,
+    )
 
     # Side column: the same Aktuality feed cards, read-only, for side-by-side
     # comparison with the chart (no filters — just the freshest notes)

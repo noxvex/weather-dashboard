@@ -679,3 +679,81 @@ class HistoriePinsRoundThreeTest(TestCase):
         self.assertIn("Změna proti předchozímu dni", html)
         self.assertIn("is-leader", html)
         self.assertIn("lead · leader", html)
+
+
+class PageTweaksRoundFourTest(TestCase):
+    """
+    Round four of live feedback: Revize gets a snapshot picker (?proti=) and
+    a CZ/SR filter, Historie loses the span tabs, Bod takes a custom forecast
+    day count, and Aktuality's sidebar holds the full revision list instead
+    of the weather panel.
+    """
+
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(username="round4", password="x")
+        self.client.force_login(self.user)
+        self.cz_point = WeatherPoint.objects.create(
+            name="Testov", region="Test", country="CZ", latitude=50.0, longitude=15.0,
+        )
+        self.sk_point = WeatherPoint.objects.create(
+            name="Testovo", region="Test", country="SK", latitude=48.7, longitude=19.5,
+        )
+        self.today = date.today()
+        # Three short-range snapshots (3 days ago / yesterday / today) whose
+        # forecasts differ, so every comparison yields deltas ≥ 0.5 °C
+        self.snap_dates = []
+        for days_ago, temp in ((3, 10.0), (1, 15.0), (0, 20.0)):
+            issued = timezone.now() - timedelta(days=days_ago)
+            self.snap_dates.append(issued.date())
+            for p in (self.cz_point, self.sk_point):
+                for offset in range(3):
+                    DailyForecast.objects.create(
+                        point=p, forecast_date=self.today + timedelta(days=offset),
+                        horizon=DailyForecast.HORIZON_SHORT, issued_at=issued,
+                        temperature_min=temp - 5, temperature_max=temp,
+                        precipitation_sum=1.0,
+                    )
+
+    def test_revize_default_compares_with_previous(self):
+        resp = self.client.get(reverse("notes:revision_tracker"))
+        self.assertEqual(resp.context["previous_batch"], self.snap_dates[1])
+        self.assertTrue(resp.context["revisions"])
+        # +5 °C between yesterday's and today's snapshot
+        self.assertEqual(resp.context["revisions"][0]["temp_delta"], 5.0)
+
+    def test_revize_proti_picks_older_snapshot(self):
+        oldest = self.snap_dates[0]
+        resp = self.client.get(
+            reverse("notes:revision_tracker") + f"?proti={oldest.isoformat()}"
+        )
+        self.assertEqual(resp.context["previous_batch"], oldest)
+        self.assertEqual(resp.context["revisions"][0]["temp_delta"], 10.0)
+
+    def test_revize_country_filter(self):
+        resp = self.client.get(reverse("notes:revision_tracker") + "?zeme=cz")
+        rows = resp.context["revisions"]
+        self.assertTrue(rows)
+        self.assertTrue(all(r["country"] == "ČR" for r in rows))
+
+    def test_historie_span_tabs_gone(self):
+        resp = self.client.get("/historie/?rozsah=kratka")
+        self.assertEqual(resp.context["rozsah"], "plna")
+        self.assertNotIn("Krátkodobá", resp.content.decode())
+
+    def test_bod_custom_forecast_days(self):
+        url = f"/bod/?bod={self.cz_point.pk}"
+        self.assertEqual(self.client.get(url).context["forecast_days"], 7)
+        self.assertEqual(self.client.get(url + "&pd=5").context["forecast_days"], 5)
+        self.assertEqual(self.client.get(url + "&pd=99").context["forecast_days"], 16)
+
+    def test_aktuality_sidebar_holds_full_revision_list(self):
+        resp = self.client.get(reverse("notes:aktuality"))
+        html = resp.content.decode()
+        self.assertIn("Revize předpovědi", html)
+        self.assertNotIn("Všech 22 bodů", html)
+        self.assertIn("filter-cols", html)
+        summary = resp.context["revision_summary"]
+        # limit=None — the sidebar gets every delta, not a top-5 cut
+        self.assertEqual(len(summary["top"]), summary["total"])
+        self.assertGreater(summary["total"], 5)
