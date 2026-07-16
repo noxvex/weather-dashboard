@@ -2,15 +2,41 @@ from django.db import models
 
 
 class WeatherPoint(models.Model):
+    # Macro region = the selector's middle level (country → macro region →
+    # city). Distinct from `region`, which stores the administrative kraj name.
+    MACRO_CECHY = "cechy"
+    MACRO_MORAVA = "morava"
+    MACRO_ZAPADNE = "zapadne"
+    MACRO_STREDNE = "stredne"
+    MACRO_VYCHODNE = "vychodne"
+    MACRO_REGION_CHOICES = [
+        (MACRO_CECHY, "Čechy"),
+        (MACRO_MORAVA, "Morava"),
+        (MACRO_ZAPADNE, "Západné Slovensko"),
+        (MACRO_STREDNE, "Stredné Slovensko"),
+        (MACRO_VYCHODNE, "Východné Slovensko"),
+    ]
+    MACRO_REGION_COUNTRY = {
+        MACRO_CECHY: "CZ",
+        MACRO_MORAVA: "CZ",
+        MACRO_ZAPADNE: "SK",
+        MACRO_STREDNE: "SK",
+        MACRO_VYCHODNE: "SK",
+    }
+
     name = models.CharField(max_length=100)
     region = models.CharField(max_length=100)
     country = models.CharField(max_length=2)  # "CZ" or "SK"
+    macro_region = models.CharField(max_length=10, choices=MACRO_REGION_CHOICES, blank=True, default="")
     latitude = models.DecimalField(max_digits=6, decimal_places=4)
     longitude = models.DecimalField(max_digits=7, decimal_places=4)
 
     class Meta:
         ordering = ["country", "name"]
-        indexes = [models.Index(fields=["country"])]
+        indexes = [
+            models.Index(fields=["country"]),
+            models.Index(fields=["macro_region"]),
+        ]
 
     def __str__(self):
         return f"{self.name} ({self.country})"
