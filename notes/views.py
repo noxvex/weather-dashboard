@@ -834,7 +834,7 @@ def subhistorie(request):
 
 # ── Revision tracker ────────────────────────────────────────────────────────
 
-def _mlr_revision_context(horizon, threshold, proti_raw=""):
+def _mlr_revision_context(horizon, threshold, proti_raw="", scopes=None):
     """
     Same shape as the aktuální branch below, but for a MediumLongRangeForecast
     horizon (EC46/SEAS5): compares the latest issued_at snapshot against the
@@ -844,11 +844,15 @@ def _mlr_revision_context(horizon, threshold, proti_raw=""):
     in the precip_probability field, not a real probability — Open-Meteo's
     seasonal API has no true precip-probability variable; see the comment in
     fetch_seasonal.py (and fetch_ec46.py) for why that field holds mm.
+    `scopes` is a list of (scope, label) pairs to average over — defaults to
+    the two national averages; a ?bod= selection passes a single scope.
     Returns a dict to merge into the view context — either {"revisions",
     "latest_batch", "previous_batch", "batch_options"} or
     {"revisions": [], "not_enough_data": True}.
     """
     today = date.today()
+    if scopes is None:
+        scopes = [({"country": "CZ"}, "ČR"), ({"country": "SK"}, "SR")]
 
     batch_dates = list(
         MediumLongRangeForecast.objects
@@ -866,32 +870,27 @@ def _mlr_revision_context(horizon, threshold, proti_raw=""):
             previous = bd
             break
 
-    def get_nat_series(batch_dt, country):
-        rows = list(
-            MediumLongRangeForecast.objects.filter(
-                horizon=horizon, issued_at=batch_dt, point__country=country,
-                target_date__gte=today,
-            )
-        )
-        by_date = defaultdict(list)
-        for r in rows:
-            by_date[r.target_date].append(r)
-        return {
-            fd: {"temp_mean": _avg(day_rows, "temp_mean"), "precip_prob": _avg(day_rows, "precip_probability")}
-            for fd, day_rows in sorted(by_date.items())
-        }
+    # Both snapshots in one query — scoping happens in Python on the
+    # pre-joined points, so extra scopes cost no extra round-trips.
+    rows = list(
+        MediumLongRangeForecast.objects
+        .filter(horizon=horizon, issued_at__in=[latest, previous], target_date__gte=today)
+        .select_related("point")
+    )
+    latest_rows = [r for r in rows if r.issued_at == latest]
+    prev_rows = [r for r in rows if r.issued_at == previous]
 
     revisions = []
-    for country, label in [("CZ", "ČR"), ("SK", "SR")]:
-        latest_series = get_nat_series(latest, country)
-        prev_series = get_nat_series(previous, country)
+    for scope, label in scopes:
+        latest_series = _scope_daily_avg(latest_rows, scope, "target_date", ("temp_mean", "precip_probability"))
+        prev_series = _scope_daily_avg(prev_rows, scope, "target_date", ("temp_mean", "precip_probability"))
         for fd in sorted(latest_series):
             if fd not in prev_series:
                 continue
             lt = latest_series[fd]["temp_mean"]
             pt = prev_series[fd]["temp_mean"]
-            lp = latest_series[fd]["precip_prob"]
-            pp = prev_series[fd]["precip_prob"]
+            lp = latest_series[fd]["precip_probability"]
+            pp = prev_series[fd]["precip_probability"]
             temp_delta = round(lt - pt, 1) if lt is not None and pt is not None else None
             precip_prob_delta = round(lp - pp) if lp is not None and pp is not None else None
             if temp_delta is not None and abs(temp_delta) >= threshold:
@@ -922,7 +921,22 @@ def revision_tracker(request):
     # Which older snapshot to compare the latest against — defaults to the
     # immediately previous one ("co se teď stalo")
     proti_raw = request.GET.get("proti", "")
-    context = {"bucket": bucket, "zeme": zeme}
+
+    # ?bod= narrows the comparison scope; default "" keeps the classic
+    # two-national-averages view (with the zeme chips filtering it).
+    points = list(WeatherPoint.objects.order_by("country", "name"))
+    bod = request.GET.get("bod", "")
+    scope, _, bod_short = _parse_bod(bod, points)
+    if scope is None:
+        bod = ""
+        scopes = None  # each bucket falls back to [ČR, SR]
+        zeme_applies = True
+    else:
+        scopes = [(scope, bod_short)]
+        zeme_applies = False  # scope is already narrower than a country
+
+    context = {"bucket": bucket, "zeme": zeme if zeme_applies else "",
+               "bod": bod, **_selector_context(points)}
 
     if bucket == "aktualni":
         today = date.today()
@@ -944,32 +958,31 @@ def revision_tracker(request):
                     previous = bd
                     break
 
-            def get_nat_series(batch_date, country):
-                rows = list(
-                    DailyForecast.objects.filter(
-                        horizon=DailyForecast.HORIZON_SHORT,
-                        issued_at__date=batch_date,
-                        point__country=country,
-                        forecast_date__gte=today,
-                    ).order_by("forecast_date")
-                )
-                from collections import defaultdict
-                by_date = defaultdict(list)
-                for r in rows:
-                    by_date[r.forecast_date].append(r)
-                return {fd: {"temp_max": _avg(day_rows, "temperature_max"), "precip": _avg(day_rows, "precipitation_sum")} for fd, day_rows in sorted(by_date.items())}
+            # Both snapshots in one query; scoping happens in Python on the
+            # pre-joined points, so extra scopes cost no extra round-trips.
+            rows = list(
+                DailyForecast.objects.filter(
+                    horizon=DailyForecast.HORIZON_SHORT,
+                    issued_at__date__in=[latest, previous],
+                    forecast_date__gte=today,
+                ).select_related("point")
+            )
+            latest_rows = [r for r in rows if r.issued_at.date() == latest]
+            prev_rows = [r for r in rows if r.issued_at.date() == previous]
 
             revisions = []
-            for country, label in [("CZ", "ČR"), ("SK", "SR")]:
-                latest_series = get_nat_series(latest, country)
-                prev_series = get_nat_series(previous, country)
+            for row_scope, label in scopes or [({"country": "CZ"}, "ČR"), ({"country": "SK"}, "SR")]:
+                latest_series = _scope_daily_avg(latest_rows, row_scope, "forecast_date",
+                                                 ("temperature_max", "precipitation_sum"))
+                prev_series = _scope_daily_avg(prev_rows, row_scope, "forecast_date",
+                                               ("temperature_max", "precipitation_sum"))
                 for fd in sorted(latest_series):
                     if fd not in prev_series:
                         continue
-                    lt = latest_series[fd]["temp_max"]
-                    pt = prev_series[fd]["temp_max"]
-                    lp = latest_series[fd]["precip"]
-                    pp = prev_series[fd]["precip"]
+                    lt = latest_series[fd]["temperature_max"]
+                    pt = prev_series[fd]["temperature_max"]
+                    lp = latest_series[fd]["precipitation_sum"]
+                    pp = prev_series[fd]["precipitation_sum"]
                     temp_delta = round(lt - pt, 1) if lt is not None and pt is not None else None
                     precip_delta = round(lp - pp, 1) if lp is not None and pp is not None else None
                     if temp_delta is not None and abs(temp_delta) >= 0.5:
@@ -994,15 +1007,18 @@ def revision_tracker(request):
     elif bucket == "strednedobe":
         context.update(_mlr_revision_context(
             MediumLongRangeForecast.HORIZON_EC46, threshold=1.0, proti_raw=proti_raw,
+            scopes=scopes,
         ))
 
     elif bucket == "dlouhodobe":
         context.update(_mlr_revision_context(
             MediumLongRangeForecast.HORIZON_SEAS5, threshold=1.0, proti_raw=proti_raw,
+            scopes=scopes,
         ))
 
-    # Country filter applies to whichever bucket produced the rows
-    if zeme and context.get("revisions"):
+    # Country filter applies to whichever bucket produced the rows — only in
+    # the default national view (a bod scope is already narrower)
+    if zeme_applies and zeme and context.get("revisions"):
         wanted = "ČR" if zeme == "cz" else "SR"
         context["revisions"] = [r for r in context["revisions"] if r["country"] == wanted]
 
