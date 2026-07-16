@@ -75,15 +75,7 @@
     <input type="hidden" name="od" value="{{ od }}">
     <input type="hidden" name="do" value="{{ do }}">
     <input type="hidden" name="roky" value="{{ roky }}">
-    <select name="bod" class="point-select" onchange="histSubmit(this.form)">
-        <option value="cz" {% if sel == "cz" %}selected{% endif %}>ČR — národní průměr</option>
-        <option value="sk" {% if sel == "sk" %}selected{% endif %}>SR — národní průměr</option>
-        {% for p in points %}
-            <option value="{{ p.pk }}" {% if sel == p.pk|stringformat:"s" %}selected{% endif %}>
-                {{ p.name }} ({{ p.country }})
-            </option>
-        {% endfor %}
-    </select>
+    {% include "notes/_bod_select.html" with sel=sel submit_js="histSubmit(this.form)" %}
     <select name="m" class="point-select" onchange="histSubmit(this.form)">
         <option value="t" {% if metric == "t" %}selected{% endif %}>Teplota</option>
         <option value="p" {% if metric == "p" %}selected{% endif %}>Srážky</option>

@@ -138,6 +138,9 @@ class HistoriePin(models.Model):
         if self.sel == "sk":
             return "SR (národní průměr)"
         from ingest.models import WeatherPoint
+        macro_labels = dict(WeatherPoint.MACRO_REGION_CHOICES)
+        if self.sel in macro_labels:
+            return f"{macro_labels[self.sel]} (regionální průměr)"
         point = WeatherPoint.objects.filter(pk=self.sel).first() if self.sel.isdigit() else None
         return f"{point.name} ({point.country})" if point else "neznámý bod"
 

@@ -48,6 +48,76 @@ def _temp_pct(delta, prev):
     return round(delta / abs(prev) * 100)
 
 
+# ── Bod selection (country → macro region → city) ───────────────────────────
+
+_REGION_LABELS = dict(WeatherPoint.MACRO_REGION_CHOICES)
+
+
+def _parse_bod(sel, points=None):
+    """
+    Parse a ?bod= value shared by the hierarchical selectors (Historie,
+    Revize, Aktuality) into (scope, label, short_label). scope holds exactly
+    one of country/macro_region/point_id; label is the full Czech UI name,
+    short_label the compact one for table chips and chart legends. Unknown
+    values return (None, None, None) so each caller keeps its own default.
+    Pass pre-fetched `points` to resolve city pks without a query.
+    """
+    if sel == "cz":
+        return {"country": "CZ"}, "ČR (národní průměr)", "ČR"
+    if sel == "sk":
+        return {"country": "SK"}, "SR (národní průměr)", "SR"
+    if sel in _REGION_LABELS:
+        label = _REGION_LABELS[sel]
+        return {"macro_region": sel}, f"{label} (regionální průměr)", label
+    if sel and sel.isdigit():
+        pk = int(sel)
+        if points is not None:
+            point = next((p for p in points if p.pk == pk), None)
+        else:
+            point = WeatherPoint.objects.filter(pk=pk).first()
+        if point is not None:
+            return {"point_id": point.pk}, f"{point.name} ({point.country})", point.name
+    return None, None, None
+
+
+def _point_in_scope(point, scope):
+    """Whether a WeatherPoint belongs to the parsed selection scope."""
+    if "point_id" in scope:
+        return point.pk == scope["point_id"]
+    if "macro_region" in scope:
+        return point.macro_region == scope["macro_region"]
+    return point.country == scope["country"]
+
+
+def _scope_daily_avg(rows, scope, date_attr, fields):
+    """
+    Plain arithmetic mean across all points in scope, per date:
+    {date: {field: avg}}. Works for any numeric field the rows carry
+    (temperature, precipitation, temp_mean, ...); rows need `point`
+    pre-joined so scoping costs no extra queries.
+    """
+    by_date = defaultdict(list)
+    for r in rows:
+        if _point_in_scope(r.point, scope):
+            by_date[getattr(r, date_attr)].append(r)
+    return {
+        d: {f: _avg(day_rows, f) for f in fields}
+        for d, day_rows in sorted(by_date.items())
+    }
+
+
+def _selector_context(points):
+    """Template context bits every page with the hierarchical selector needs."""
+    return {
+        "points_cz": [p for p in points if p.country == "CZ"],
+        "points_sk": [p for p in points if p.country == "SK"],
+        "regions_cz": [(slug, label) for slug, label in WeatherPoint.MACRO_REGION_CHOICES
+                       if WeatherPoint.MACRO_REGION_COUNTRY[slug] == "CZ"],
+        "regions_sk": [(slug, label) for slug, label in WeatherPoint.MACRO_REGION_CHOICES
+                       if WeatherPoint.MACRO_REGION_COUNTRY[slug] == "SK"],
+    }
+
+
 def _get_latest_short_rows(batches=1):
     """
     Returns (rows, batch_dates) for the most recent `batches` short-range
@@ -483,12 +553,14 @@ def note_pin(request, pk):
 # ── Historie pins ───────────────────────────────────────────────────────────
 
 def _pin_series_target(sel):
-    """Map a pin's sel ("cz"/"sk"/point pk) to _historical_series kwargs."""
+    """Map a pin's sel ("cz"/"sk"/region slug/point pk) to _historical_series kwargs."""
     if sel == "cz":
-        return {"country": "CZ", "point_id": None}
+        return {"country": "CZ"}
     if sel == "sk":
-        return {"country": "SK", "point_id": None}
-    return {"country": None, "point_id": int(sel) if sel.isdigit() else -1}
+        return {"country": "SK"}
+    if sel in _REGION_LABELS:
+        return {"macro_region": sel}
+    return {"point_id": int(sel) if sel.isdigit() else -1}
 
 
 def _stats_from_daily(daily, doy_from, doy_to, roky):
@@ -513,7 +585,7 @@ def _stats_from_daily(daily, doy_from, doy_to, roky):
     }
 
 
-def _pins_context(user, sel, metric, gran, country, point_id, rows):
+def _pins_context(user, sel, metric, gran, country, point_id, rows, macro_region=None):
     """
     Pins matching the currently displayed bod+metric, newest first, no count
     limit. Each gets marker/shading x positions in the chart's current x
@@ -531,7 +603,8 @@ def _pins_context(user, sel, metric, gran, country, point_id, rows):
         return []
 
     daily = rows if gran == "d" else _historical_series(
-        country=country, point_id=point_id, granularity="d", metric=metric,
+        country=country, point_id=point_id, macro_region=macro_region,
+        granularity="d", metric=metric,
     )
 
     def to_x(doy):
@@ -592,6 +665,8 @@ def _create_pin_feed_note(pin):
     country = Note.COUNTRY_BOTH
     if pin.sel in (Note.COUNTRY_CZ, Note.COUNTRY_SK):
         country = pin.sel
+    elif pin.sel in WeatherPoint.MACRO_REGION_COUNTRY:
+        country = WeatherPoint.MACRO_REGION_COUNTRY[pin.sel].lower()
     elif pin.sel.isdigit():
         point = WeatherPoint.objects.filter(pk=pin.sel).first()
         if point:
@@ -1250,7 +1325,7 @@ class _ExtractDoy(Func):
     output_field = IntegerField()
 
 
-def _historical_series(country=None, point_id=None, granularity="w", metric="t"):
+def _historical_series(country=None, point_id=None, macro_region=None, granularity="w", metric="t"):
     """
     Series aggregated in SQL, grouped by (year, x) where x is ISO
     week-of-year (weekly) or day-of-year (daily).
@@ -1259,12 +1334,14 @@ def _historical_series(country=None, point_id=None, granularity="w", metric="t")
     precipitation accumulates (sum it):
       - temp: Avg of the daily midpoint (temp_min + temp_max) / 2
       - precip weekly: Sum / Count(DISTINCT point) (per-point weekly total,
-        averaged across points for national aggregates)
+        averaged across points for national/regional aggregates)
       - precip daily: Avg across points
     """
     qs = HistoricalActual.objects.all()
     if point_id is not None:
         qs = qs.filter(point_id=point_id)
+    elif macro_region is not None:
+        qs = qs.filter(point__macro_region=macro_region)
     elif country is not None:
         qs = qs.filter(point__country=country)
 
@@ -1291,7 +1368,7 @@ def _historical_series(country=None, point_id=None, granularity="w", metric="t")
     )
 
 
-_MLR_FORECAST_CACHE_KEY = "historie_mlr_forecast_rows"
+_MLR_FORECAST_CACHE_KEY = "historie_mlr_forecast_rows_v2"  # v2: rows carry point__macro_region
 
 
 def _get_mlr_forecast_rows():
@@ -1322,15 +1399,15 @@ def _get_mlr_forecast_rows():
             MediumLongRangeForecast.objects
             .filter(horizon=horizon, issued_at=latest,
                     target_date__gte=today, temp_mean__isnull=False)
-            .values("point_id", "point__country", "target_date", "temp_mean", "horizon")
+            .values("point_id", "point__country", "point__macro_region", "target_date", "temp_mean", "horizon")
             .order_by("target_date")
         )
     cache.set(_MLR_FORECAST_CACHE_KEY, rows, _CACHE_TTL)
     return rows
 
 
-def _forecast_overlay_series(country=None, point_id=None, granularity="w", metric="t",
-                             doy_from=None, doy_to=None):
+def _forecast_overlay_series(country=None, point_id=None, macro_region=None, granularity="w",
+                             metric="t", doy_from=None, doy_to=None):
     """
     Forecast continuation of the current year for the Historie overlay,
     aggregated to the same x axis and with the same averaging rules as
@@ -1347,9 +1424,11 @@ def _forecast_overlay_series(country=None, point_id=None, granularity="w", metri
     """
     today = date.today()
 
-    def wanted(pid, pcountry):
+    def wanted(pid, pcountry, pmacro):
         if point_id is not None:
             return pid == point_id
+        if macro_region is not None:
+            return pmacro == macro_region
         if country is not None:
             return pcountry == country
         return True
@@ -1360,7 +1439,7 @@ def _forecast_overlay_series(country=None, point_id=None, granularity="w", metri
     # Two ingests on the same day share a batch date — sort by issued_at so
     # the newest snapshot's value wins for a duplicated (point, date).
     for r in sorted(short_rows, key=lambda r: r.issued_at):
-        if r.forecast_date < today or not wanted(r.point_id, r.point.country):
+        if r.forecast_date < today or not wanted(r.point_id, r.point.country, r.point.macro_region):
             continue
         if metric == "p":
             if r.precipitation_sum is not None:
@@ -1372,7 +1451,7 @@ def _forecast_overlay_series(country=None, point_id=None, granularity="w", metri
     if metric == "t":
         ec46_map, seas5_map = defaultdict(dict), defaultdict(dict)
         for r in _get_mlr_forecast_rows():
-            if not wanted(r["point_id"], r["point__country"]):
+            if not wanted(r["point_id"], r["point__country"], r.get("point__macro_region", "")):
                 continue
             target = ec46_map if r["horizon"] == MediumLongRangeForecast.HORIZON_EC46 else seas5_map
             target[r["target_date"]][r["point_id"]] = r["temp_mean"]
@@ -1450,25 +1529,21 @@ def historie(request):
         doy_from, doy_to = doy_to, doy_from
         od_raw, do_raw = do_raw, od_raw
 
-    country = None
-    point_id = None
-    if sel == "cz":
-        country, selection_label = "CZ", "ČR (národní průměr)"
-    elif sel == "sk":
-        country, selection_label = "SK", "SR (národní průměr)"
-    else:
-        point = next((p for p in points if str(p.pk) == sel), None)
-        if point is None:
-            sel, country, selection_label = "cz", "CZ", "ČR (národní průměr)"
-        else:
-            point_id, selection_label = point.pk, f"{point.name} ({point.country})"
+    scope, selection_label, _ = _parse_bod(sel, points)
+    if scope is None:
+        sel = "cz"
+        scope, selection_label, _ = _parse_bod(sel, points)
+    country = scope.get("country")
+    point_id = scope.get("point_id")
+    macro_region = scope.get("macro_region")
 
     # Overlay: full history, or manual comparison (daily, custom doy range,
     # last `roky` years, all traces visible)
     if rozsah == "vlastni":
         gran = "d"
         rezim = "abs"
-    rows = _historical_series(country=country, point_id=point_id, granularity=gran, metric=metric)
+    rows = _historical_series(country=country, point_id=point_id, macro_region=macro_region,
+                              granularity=gran, metric=metric)
 
     # "Current year" must be determined from the full unfiltered series,
     # not from the doy-filtered by_year below — a custom range that reaches
@@ -1525,7 +1600,8 @@ def historie(request):
     # selected slice: there'd be no trace to visually continue from.
     if rezim == "abs" and current_year in by_year:
         fc = _forecast_overlay_series(
-            country=country, point_id=point_id, granularity=gran, metric=metric,
+            country=country, point_id=point_id, macro_region=macro_region,
+            granularity=gran, metric=metric,
             doy_from=doy_from if rozsah == "vlastni" else None,
             doy_to=doy_to if rozsah == "vlastni" else None,
         )
@@ -1565,7 +1641,7 @@ def historie(request):
     # Pins live in doy space, so they only render in overlay modes
     pins = _pins_context(
         request.user, sel=sel, metric=metric, gran=gran,
-        country=country, point_id=point_id, rows=rows,
+        country=country, point_id=point_id, macro_region=macro_region, rows=rows,
     )
 
     # Side column: the same Aktuality feed cards, read-only, for side-by-side
@@ -1579,6 +1655,7 @@ def historie(request):
         "has_data": has_data,
         "feed_notes": feed_notes,
         "points": points,
+        **_selector_context(points),
         "sel": sel,
         "gran": gran,
         "metric": metric,
