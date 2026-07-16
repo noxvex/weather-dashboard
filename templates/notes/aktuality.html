@@ -19,7 +19,17 @@
 
 {# ══════════ Forecast graph (instrument panel) ══════════ #}
 <div class="card chart-card">
-    <div class="card-title">Vývoj teploty <span class="hint">ČR + SK národní průměr</span></div>
+    <div class="card-title" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <span>Vývoj teploty <span class="hint">{% if bod_label %}{{ bod_label }}{% else %}ČR + SK národní průměr{% endif %}</span></span>
+        {# Scope selector — reloads with ?bod=, feed filters carried via hidden inputs #}
+        <form method="get" style="margin:0 0 0 auto; display:inline-flex;">
+            {% if active_filter %}<input type="hidden" name="autor" value="{{ active_filter }}">{% endif %}
+            {% if active_rozsah %}<input type="hidden" name="rozsah" value="{{ active_rozsah }}">{% endif %}
+            {% if active_horizont %}<input type="hidden" name="horizont" value="{{ active_horizont }}">{% endif %}
+            {% if active_zeme %}<input type="hidden" name="zeme" value="{{ active_zeme }}">{% endif %}
+            {% include "notes/_bod_select.html" with sel=active_bod all_label="ČR + SR — národní průměry" %}
+        </form>
+    </div>
     <div style="display:flex; gap:10px; align-items:stretch; margin-bottom:14px; flex-wrap:wrap;">
         <div class="seg" style="flex:1; margin-bottom:0; min-width:320px;">
             <button class="seg-short on" data-mode="short">Krátkodobá<small>1–16 dní</small></button>
@@ -63,6 +73,7 @@
             <input type="hidden" name="rozsah"   id="f-rozsah"   value="{{ active_rozsah }}">
             <input type="hidden" name="horizont" id="f-horizont" value="{{ active_horizont }}">
             <input type="hidden" name="zeme"     id="f-zeme"     value="{{ active_zeme }}">
+            <input type="hidden" name="bod"      id="f-bod"      value="{{ active_bod }}">
             {# strana intentionally omitted — filter change resets to page 1 #}
         </form>
 
@@ -290,8 +301,21 @@
     };
     const config = { displayModeBar: false, responsive: true };
 
+    // Scoped mode (?bod=) serves a single 'sel' series instead of cz/sk;
+    // the label rides on the short dataset only, so keep it around.
+    const selLabel = datasets.short.label || 'Výběr';
+
     function buildTraces(data) {
         const traces = [];
+        if (data.sel && data.sel.length) {
+            traces.push({
+                x: data.sel.map(d => d.date), y: data.sel.map(d => d.temp),
+                type: 'scatter', mode: 'lines', name: selLabel,
+                line: { color: '#4A9EFF', width: 2.5, shape: 'spline' },
+                fill: 'tozeroy', fillcolor: 'rgba(74,158,255,0.10)',
+                hovertemplate: '%{y:.1f}°C<extra>' + selLabel + '</extra>',
+            });
+        }
         if (data.cz && data.cz.length) {
             traces.push({
                 x: data.cz.map(d => d.date), y: data.cz.map(d => d.temp),
@@ -354,7 +378,7 @@
             return shortD.concat(seasonal.filter(d => d.date > lastShort))
                          .filter(d => d.date <= cut);
         };
-        return { cz: merge('cz'), sk: merge('sk') };
+        return { cz: merge('cz'), sk: merge('sk'), sel: merge('sel') };
     }
 
     document.getElementById('cust-apply').addEventListener('click', function () {

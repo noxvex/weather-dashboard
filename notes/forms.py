@@ -59,7 +59,7 @@ class HistoriePinForm(forms.ModelForm):
 
     def clean_sel(self):
         sel = self.cleaned_data["sel"].strip()
-        if sel in ("cz", "sk"):
+        if sel in ("cz", "sk") or sel in WeatherPoint.MACRO_REGION_COUNTRY:
             return sel
         if sel.isdigit() and WeatherPoint.objects.filter(pk=sel).exists():
             return sel

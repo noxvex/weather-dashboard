@@ -1,0 +1,31 @@
+{# Shared 3-level bod selector: republic averages → macro regions → cities. #}
+{# Params: sel (current ?bod= value), regions_cz/regions_sk, points_cz/points_sk #}
+{# (all from _selector_context), optional all_label (adds a "" option on top), #}
+{# optional submit_js (onchange override, defaults to plain form submit). #}
+<select name="bod" class="point-select" onchange="{{ submit_js|default:'this.form.submit()' }}">
+    {% if all_label %}
+    <option value="" {% if not sel %}selected{% endif %}>{{ all_label }}</option>
+    {% endif %}
+    <option value="cz" {% if sel == "cz" %}selected{% endif %}>ČR — národní průměr</option>
+    <option value="sk" {% if sel == "sk" %}selected{% endif %}>SR — národní průměr</option>
+    <optgroup label="Regiony ČR">
+        {% for slug, label in regions_cz %}
+        <option value="{{ slug }}" {% if sel == slug %}selected{% endif %}>{{ label }} — regionální průměr</option>
+        {% endfor %}
+    </optgroup>
+    <optgroup label="Regiony SR">
+        {% for slug, label in regions_sk %}
+        <option value="{{ slug }}" {% if sel == slug %}selected{% endif %}>{{ label }} — regionální průměr</option>
+        {% endfor %}
+    </optgroup>
+    <optgroup label="Města ČR">
+        {% for p in points_cz %}
+        <option value="{{ p.pk }}" {% if sel == p.pk|stringformat:"s" %}selected{% endif %}>{{ p.name }}</option>
+        {% endfor %}
+    </optgroup>
+    <optgroup label="Města SR">
+        {% for p in points_sk %}
+        <option value="{{ p.pk }}" {% if sel == p.pk|stringformat:"s" %}selected{% endif %}>{{ p.name }}</option>
+        {% endfor %}
+    </optgroup>
+</select>
