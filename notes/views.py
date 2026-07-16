@@ -225,8 +225,24 @@ def _get_since_login(last_login):
 
 # ── Chart data (16-day national averages for Plotly) ───────────────────────
 
-def _get_chart_data(batch_rows):
-    """16-day national avg series derived from pre-fetched batch rows — zero extra queries."""
+def _get_chart_data(batch_rows, scope=None, label=""):
+    """
+    16-day avg series derived from pre-fetched batch rows — zero extra
+    queries. Default: the two national averages ({cz, sk}). With a scope
+    (from _parse_bod): one 'sel' series averaged across the scope's points,
+    plus its legend label.
+    """
+    if scope is not None:
+        by_date = defaultdict(list)
+        for r in batch_rows:
+            if r.temperature_max is not None and _point_in_scope(r.point, scope):
+                by_date[r.forecast_date.isoformat()].append(r.temperature_max)
+        series = [
+            {"date": d, "temp": round(sum(vals) / len(vals), 1)}
+            for d, vals in sorted(by_date.items())
+        ]
+        return {"sel": series, "label": label}
+
     by_country_date = {"CZ": defaultdict(list), "SK": defaultdict(list)}
     for r in batch_rows:
         if r.point.country in by_country_date and r.temperature_max is not None:
@@ -247,20 +263,30 @@ _HISTORICAL_EXISTS_KEY = "aktuality_has_historical"
 _CACHE_TTL = 3600  # 1 hour — seasonal data only changes once per day via cron
 
 
-def _get_seasonal_chart_data():
+def _get_seasonal_chart_data(scope=None, sel=""):
     """
     Returns (mid, long) chart dicts of SEAS5 seasonal mean temp per target_date
-    (national average) from the latest issued snapshot:
+    from the latest issued snapshot:
       mid  = střednědobá, target_date within 1–4 months from today
       long = dlouhodobá,  target_date beyond 4 months (to ~7 months)
-    Each is {cz: [{date, temp}, ...], sk: [...]}; empty lists if no data yet.
-    Result is cached for 1 hour (LocMemCache by default, no extra infra needed).
+    Default: national averages, each {cz: [{date, temp}, ...], sk: [...]}.
+    With a scope (from _parse_bod): a single averaged series under 'sel'.
+    Empty lists if no data yet. Cached 1 hour per selection (LocMemCache by
+    default, no extra infra needed) — `sel` is the raw ?bod= value and only
+    namespaces the cache key.
     """
-    cached = cache.get(_SEASONAL_CACHE_KEY)
+    cache_key = f"{_SEASONAL_CACHE_KEY}_{sel}" if scope is not None else _SEASONAL_CACHE_KEY
+    cached = cache.get(cache_key)
     if cached is not None:
         return cached
 
-    empty = {"cz": [], "sk": []}
+    channels = ["sel"] if scope is not None else ["cz", "sk"]
+
+    def channel_of(r):
+        if scope is not None:
+            return "sel" if _point_in_scope(r.point, scope) else None
+        return r.point.country.lower() if r.point.country in ("CZ", "SK") else None
+
     latest = (
         MediumLongRangeForecast.objects
         .filter(horizon=MediumLongRangeForecast.HORIZON_SEAS5)
@@ -269,8 +295,8 @@ def _get_seasonal_chart_data():
         .first()
     )
     if not latest:
-        result = dict(empty), dict(empty)
-        cache.set(_SEASONAL_CACHE_KEY, result, _CACHE_TTL)
+        result = {c: [] for c in channels}, {c: [] for c in channels}
+        cache.set(cache_key, result, _CACHE_TTL)
         return result
 
     rows = list(
@@ -282,26 +308,27 @@ def _get_seasonal_chart_data():
 
     mid_cutoff = date.today() + timedelta(days=120)  # ~4 months
     buckets = {
-        "mid": {"CZ": defaultdict(list), "SK": defaultdict(list)},
-        "long": {"CZ": defaultdict(list), "SK": defaultdict(list)},
+        "mid": {c: defaultdict(list) for c in channels},
+        "long": {c: defaultdict(list) for c in channels},
     }
     for r in rows:
-        if r.point.country not in ("CZ", "SK") or r.temp_mean is None:
+        ch = channel_of(r)
+        if ch is None or r.temp_mean is None:
             continue
         key = "mid" if r.target_date <= mid_cutoff else "long"
-        buckets[key][r.point.country][r.target_date.isoformat()].append(r.temp_mean)
+        buckets[key][ch][r.target_date.isoformat()].append(r.temp_mean)
 
-    def to_chart(by_country):
+    def to_chart(by_channel):
         return {
-            country.lower(): [
+            ch: [
                 {"date": d, "temp": round(sum(vals) / len(vals), 1)}
                 for d, vals in sorted(by_date.items())
             ]
-            for country, by_date in by_country.items()
+            for ch, by_date in by_channel.items()
         }
 
     result = to_chart(buckets["mid"]), to_chart(buckets["long"])
-    cache.set(_SEASONAL_CACHE_KEY, result, _CACHE_TTL)
+    cache.set(cache_key, result, _CACHE_TTL)
     return result
 
 
@@ -426,6 +453,13 @@ def aktuality(request):
     horizont = request.GET.get("horizont", "")   # "" = short+mid (default), short/mid/long/vse
     zeme = request.GET.get("zeme", "")           # "" = both, cz, sk
 
+    # ?bod= scopes the Přehled chart; default "" keeps the classic ČR+SR view
+    points = list(WeatherPoint.objects.order_by("country", "name"))
+    bod = request.GET.get("bod", "")
+    bod_scope, bod_label, bod_short = _parse_bod(bod, points)
+    if bod_scope is None:
+        bod, bod_label = "", ""
+
     # historie_pin: reverse OneToOne of cross-posted pin cards — select_related
     # so the card's summary/deep link doesn't cost a query per note
     notes_qs = Note.objects.select_related("author", "historie_pin").filter(is_hidden=False)
@@ -461,8 +495,12 @@ def aktuality(request):
     # Pass the raw dict — the json_script template filter handles serialization.
     # Pre-dumping here double-encodes: JSON.parse in the browser then yields a
     # string instead of an object and the chart silently renders nothing.
-    chart_json = _get_chart_data(latest_rows)
-    mid_json, long_json = _get_seasonal_chart_data()
+    if bod_scope is not None:
+        chart_json = _get_chart_data(latest_rows, bod_scope, bod_short)
+        mid_json, long_json = _get_seasonal_chart_data(bod_scope, bod)
+    else:
+        chart_json = _get_chart_data(latest_rows)
+        mid_json, long_json = _get_seasonal_chart_data()
     # Full list, not top-5 — the sidebar renders it as a long scrollable column
     revision_summary = _get_revision_summary(all_rows, batch_dates, limit=None)
 
@@ -470,11 +508,11 @@ def aktuality(request):
     if has_historical is None:
         has_historical = HistoricalActual.objects.exists()
         cache.set(_HISTORICAL_EXISTS_KEY, has_historical, _CACHE_TTL)
-    has_mid = bool(mid_json.get("cz") or mid_json.get("sk"))
-    has_long = bool(long_json.get("cz") or long_json.get("sk"))
+    has_mid = bool(mid_json.get("cz") or mid_json.get("sk") or mid_json.get("sel"))
+    has_long = bool(long_json.get("cz") or long_json.get("sk") or long_json.get("sel"))
 
     # Query string for pagination links (all active filters, no strana)
-    pagination_qs = _filter_qs_string(autor=autor, rozsah=rozsah, horizont=horizont, zeme=zeme)
+    pagination_qs = _filter_qs_string(autor=autor, rozsah=rozsah, horizont=horizont, zeme=zeme, bod=bod)
 
     return render(request, "notes/aktuality.html", {
         "notes": notes,
@@ -486,6 +524,9 @@ def aktuality(request):
         "active_rozsah": rozsah,
         "active_horizont": horizont,
         "active_zeme": zeme,
+        "active_bod": bod,
+        "bod_label": bod_label,
+        **_selector_context(points),
         "pagination_qs": pagination_qs,
         "chart_json": chart_json,
         "mid_json": mid_json,
