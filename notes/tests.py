@@ -757,3 +757,208 @@ class PageTweaksRoundFourTest(TestCase):
         # limit=None — the sidebar gets every delta, not a top-5 cut
         self.assertEqual(len(summary["top"]), summary["total"])
         self.assertGreater(summary["total"], 5)
+
+
+class RegionalHierarchyTest(TestCase):
+    """
+    3-level bod selector (country → macro region → city) on Historie,
+    Revize and Aktuality. Republic and regional averages must be the plain
+    arithmetic mean of their points, the selector's region options must
+    aggregate ONLY the region's points, and the pre-existing single-city
+    selection must keep working unchanged.
+    """
+
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(username="tester_reg", password="x")
+        self.client.force_login(self.user)
+        # Two Morava points with different temps, one Čechy point, one SK
+        # point — enough to tell apart regional, national and city averages.
+        self.brno = WeatherPoint.objects.create(
+            name="Brno", region="Jihomoravský kraj", country="CZ",
+            macro_region=WeatherPoint.MACRO_MORAVA, latitude=49.2, longitude=16.6,
+        )
+        self.zlin = WeatherPoint.objects.create(
+            name="Zlín", region="Zlínský kraj", country="CZ",
+            macro_region=WeatherPoint.MACRO_MORAVA, latitude=49.2, longitude=17.7,
+        )
+        self.praha = WeatherPoint.objects.create(
+            name="Praha", region="Hlavní město Praha", country="CZ",
+            macro_region=WeatherPoint.MACRO_CECHY, latitude=50.1, longitude=14.4,
+        )
+        self.kosice = WeatherPoint.objects.create(
+            name="Košice", region="Košický kraj", country="SK",
+            macro_region=WeatherPoint.MACRO_VYCHODNE, latitude=48.7, longitude=21.3,
+        )
+
+    def tearDown(self):
+        cache.clear()
+
+    # ── Aggregation math (Historie series helper) ───────────────────────────
+
+    def _seed_historical(self, day):
+        # Daily midpoints: Brno 10, Zlín 20, Praha 30, Košice 5
+        for point, lo, hi in [(self.brno, 5, 15), (self.zlin, 15, 25),
+                              (self.praha, 25, 35), (self.kosice, 0, 10)]:
+            HistoricalActual.objects.create(point=point, date=day, temp_min=lo, temp_max=hi)
+
+    def test_region_average_is_plain_mean_of_region_points(self):
+        from notes.views import _historical_series
+        day = date(date.today().year, 3, 10)
+        self._seed_historical(day)
+        series = _historical_series(macro_region="morava", granularity="d", metric="t")
+        self.assertEqual(len(series), 1)
+        # (10 + 20) / 2 — Praha (Čechy) and Košice (SK) must stay out
+        self.assertAlmostEqual(series[0]["value"], 15.0)
+
+    def test_country_average_is_plain_mean_of_country_points(self):
+        from notes.views import _historical_series
+        day = date(date.today().year, 3, 10)
+        self._seed_historical(day)
+        series = _historical_series(country="CZ", granularity="d", metric="t")
+        # (10 + 20 + 30) / 3
+        self.assertAlmostEqual(series[0]["value"], 20.0)
+
+    # ── Historie ─────────────────────────────────────────────────────────────
+
+    def test_historie_region_selection(self):
+        day = date(date.today().year, 3, 10)
+        self._seed_historical(day)
+        resp = self.client.get(reverse("historie"), {"bod": "morava", "g": "d"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["selection_label"], "Morava (regionální průměr)")
+        years = resp.context["chart_json"]["years"]
+        year_row = next(y for y in years if y["year"] == day.year)
+        self.assertIn(15.0, year_row["values"])
+        self.assertNotIn(30.0, year_row["values"])  # Praha must not leak in
+
+    def test_historie_city_selection_unchanged(self):
+        day = date(date.today().year, 3, 10)
+        self._seed_historical(day)
+        resp = self.client.get(reverse("historie"), {"bod": str(self.praha.pk), "g": "d"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["selection_label"], "Praha (CZ)")
+        year_row = next(y for y in resp.context["chart_json"]["years"] if y["year"] == day.year)
+        self.assertEqual(year_row["values"], [30.0])
+
+    def test_historie_unknown_bod_falls_back_to_cz(self):
+        resp = self.client.get(reverse("historie"), {"bod": "slezsko"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["sel"], "cz")
+
+    def test_historie_selector_lists_regions_and_cities(self):
+        resp = self.client.get(reverse("historie"))
+        html = resp.content.decode()
+        self.assertIn('value="morava"', html)
+        self.assertIn('value="vychodne"', html)
+        self.assertIn("Regiony ČR", html)
+        self.assertIn(f'value="{self.kosice.pk}"', html)
+
+    # ── Revize ───────────────────────────────────────────────────────────────
+
+    def _seed_revize_batches(self):
+        today = date.today()
+        fd = today + timedelta(days=1)
+        prev_issued = timezone.now() - timedelta(days=1)
+        latest_issued = timezone.now()
+        # Morava warms by 2 °C on average ((+1 + +3) / 2), Praha cools by 4,
+        # Košice steady — national CZ delta would be (1 + 3 - 4) / 3 = 0.
+        plan = [
+            (self.brno, 20.0, 21.0), (self.zlin, 20.0, 23.0),
+            (self.praha, 20.0, 16.0), (self.kosice, 20.0, 20.0),
+        ]
+        for point, prev_t, latest_t in plan:
+            for issued, temp in [(prev_issued, prev_t), (latest_issued, latest_t)]:
+                DailyForecast.objects.create(
+                    point=point, forecast_date=fd, horizon=DailyForecast.HORIZON_SHORT,
+                    issued_at=issued, temperature_max=temp, temperature_min=temp - 8,
+                    precipitation_sum=0.0,
+                )
+        return fd
+
+    def test_revize_region_scope_averages_region_points_only(self):
+        fd = self._seed_revize_batches()
+        resp = self.client.get(reverse("notes:revision_tracker"), {"bod": "morava"})
+        self.assertEqual(resp.status_code, 200)
+        revisions = resp.context["revisions"]
+        self.assertEqual(len(revisions), 1)
+        row = revisions[0]
+        self.assertEqual(row["country"], "Morava")
+        self.assertEqual(row["date"], fd)
+        self.assertEqual(row["temp_delta"], 2.0)  # (21 + 23)/2 − (20 + 20)/2
+
+    def test_revize_city_scope(self):
+        self._seed_revize_batches()
+        resp = self.client.get(reverse("notes:revision_tracker"), {"bod": str(self.praha.pk)})
+        revisions = resp.context["revisions"]
+        self.assertEqual(len(revisions), 1)
+        self.assertEqual(revisions[0]["country"], "Praha")
+        self.assertEqual(revisions[0]["temp_delta"], -4.0)
+
+    def test_revize_default_national_view_unchanged(self):
+        self._seed_revize_batches()
+        resp = self.client.get(reverse("notes:revision_tracker"))
+        # CZ national delta is 0.0 (below 0.5) and SK is 0.0 → no rows,
+        # exactly as the pre-hierarchy behavior would produce.
+        self.assertEqual(resp.context["revisions"], [])
+        self.assertEqual(resp.context["bod"], "")
+        # chips visible in default mode only
+        self.assertIn("chip-cz", resp.content.decode())
+
+    def test_revize_zeme_filter_ignored_when_bod_set(self):
+        self._seed_revize_batches()
+        resp = self.client.get(reverse("notes:revision_tracker"),
+                               {"bod": "morava", "zeme": "sk"})
+        # zeme must not empty out an explicitly scoped view
+        self.assertEqual(len(resp.context["revisions"]), 1)
+
+    # ── Aktuality ────────────────────────────────────────────────────────────
+
+    def test_aktuality_default_chart_keeps_national_series(self):
+        self._seed_revize_batches()
+        resp = self.client.get(reverse("notes:aktuality"))
+        chart = resp.context["chart_json"]
+        self.assertIn("cz", chart)
+        self.assertIn("sk", chart)
+        self.assertNotIn("sel", chart)
+
+    def test_aktuality_region_chart_averages_region_points_only(self):
+        fd = self._seed_revize_batches()
+        resp = self.client.get(reverse("notes:aktuality"), {"bod": "morava"})
+        chart = resp.context["chart_json"]
+        self.assertEqual(chart["label"], "Morava")
+        point = next(p for p in chart["sel"] if p["date"] == fd.isoformat())
+        self.assertEqual(point["temp"], 22.0)  # (21 + 23) / 2 from the latest batch
+
+    def test_aktuality_city_chart(self):
+        fd = self._seed_revize_batches()
+        resp = self.client.get(reverse("notes:aktuality"), {"bod": str(self.kosice.pk)})
+        chart = resp.context["chart_json"]
+        self.assertEqual(chart["label"], "Košice")
+        point = next(p for p in chart["sel"] if p["date"] == fd.isoformat())
+        self.assertEqual(point["temp"], 20.0)
+
+    # ── Pins with a region selection ─────────────────────────────────────────
+
+    def test_pin_form_accepts_region_and_labels_it(self):
+        from notes.forms import HistoriePinForm
+        form = HistoriePinForm(data={
+            "sel": "morava", "od": "1.3", "do": "20.3", "roky": 5,
+            "metric": "t", "body": "Region pin", "show_in_feed": False,
+        })
+        self.assertTrue(form.is_valid(), form.errors)
+        pin = form.save(commit=False)
+        pin.author = self.user
+        pin.save()
+        self.assertEqual(pin.selection_label(), "Morava (regionální průměr)")
+        self.assertIn("bod=morava", pin.historie_url())
+
+    def test_pin_feed_note_gets_region_country(self):
+        from notes.views import _create_pin_feed_note
+        pin = HistoriePin.objects.create(
+            author=self.user, body="x", sel="vychodne", od="1.3", do="20.3",
+            roky=5, metric="t", show_in_feed=True,
+        )
+        _create_pin_feed_note(pin)
+        pin.refresh_from_db()
+        self.assertEqual(pin.feed_note.country, Note.COUNTRY_SK)

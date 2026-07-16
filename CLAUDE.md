@@ -226,6 +226,26 @@ DONE (verified live on production):
   unreadable white), active state accent instead of white text.
   Tests: PageTweaksRoundFourTest. Suite: 51 tests green.
 
+- Regional hierarchy (branch regional-hierarchy): WeatherPoint.macro_region
+  (cechy 9 / morava 5 — NO separate Slezsko, Ostrava+Jihlava → morava by
+  explicit user choice; zapadne 4 / stredne 2 / vychodne 2), populated via
+  data migration 0004 keyed by (name, country) + seed_points updated.
+  Shared 3-level bod selector (_bod_select.html include, optgroup
+  hierarchy: republiky → regiony → města) on Historie, Revize a Aktuality;
+  parsing/aggregation via _parse_bod/_point_in_scope/_scope_daily_avg in
+  notes/views.py — republic/region averages are plain arithmetic means
+  across the scope's points, reused for any row metric. Historie: ?bod=
+  accepts region slugs end-to-end incl. pins (form validation, feed-note
+  country via MACRO_REGION_COUNTRY, _pin_series_target, selection_label).
+  Revize: ?bod= scopes all three buckets (one label column, zeme chips
+  hidden+ignored when scoped, still work in default view); both snapshots
+  fetched in one query now. Aktuality: ?bod= scopes the Přehled chart —
+  single 'sel' series (short + SEAS5 mid/long, seasonal cache key
+  namespaced per selection), label in legend/hint/hover, bod carried
+  through feed-filter chips and pagination. Aggregation verified by hand
+  against prod DB (Morava 20.71 vs 5-point mean; CZ 22.0036 vs 14-point
+  mean). Tests: RegionalHierarchyTest. Suite: 72 tests green.
+
 NOT YET DONE / KNOWN BROKEN (going into next session):
 - No Railway cron/worker service yet for `ingest_weather` OR
   `fetch_seasonal`/`fetch_ec46` — all three are manual-only via
